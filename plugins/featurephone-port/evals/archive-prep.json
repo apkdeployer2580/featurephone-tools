@@ -1,0 +1,70 @@
+{
+  "skill": "archive-prep",
+  "evals": [
+    {
+      "prompt": "emulator says it's not a KTF archive but it definitely came off a KTF phone",
+      "expect": "trigger",
+      "why": "Literal rejection message from the loader's platform detection. The magic-entry table and the name-agreement rules are archive-prep's core."
+    },
+    {
+      "prompt": "the game jar won't load, it panics somewhere in the file handling code with NotFound",
+      "expect": "trigger",
+      "why": "The classic missing-or-renamed member fault. Fires before the game ever runs, so it is an archive problem, not an emulator problem, even though the panic surfaces inside the emulator."
+    },
+    {
+      "prompt": "Main class not found. the archive definitely has the class in it though",
+      "expect": "trigger",
+      "why": "Descriptor key disagreeing with the archive contents. In the fault dictionary with the exact panic text and whether it fires before or after 'loaded'."
+    },
+    {
+      "prompt": "I renamed the big binary file inside the jar to something tidier and now it says invalid bss_size in filename",
+      "expect": "trigger",
+      "why": "The BSS-in-the-filename rule: the loader parses the zero-init size out of the native member's name, so that name is load-bearing. Exactly the kind of self-inflicted fault this skill's dictionary exists for."
+    },
+    {
+      "prompt": "I want to rewrite the item text file inside the jar but I'm scared of corrupting the zip",
+      "expect": "trigger",
+      "why": "Surgical in-jar repacking with member-wise byte-identity proof. This is the phase most likely to be re-entered months after the port works."
+    },
+    {
+      "prompt": "there's a folder in the archive with what looks like somebody else's savegame in it, should I be worried",
+      "expect": "trigger",
+      "why": "Stripping the previous owner's private entries. It is someone's personal data and it must come out before anything is published; the skill also carries the correction that those entries do not seed the game's database."
+    },
+    {
+      "prompt": "how do I tell whether this download package is wipi or a midlet, and repair it if it's broken",
+      "expect": "trigger",
+      "why": "Classify-then-repair in one breath. port-triage also classifies, but the moment 'repair' is in scope this is chapter 1-2 work and archive-prep should take it."
+    },
+    {
+      "prompt": "archive loads fine now but the screen stays black and nothing is logged",
+      "expect": "no-trigger",
+      "why": "emulator-core. The user has explicitly cleared the archive stage; this is the virtual-clock failure."
+    },
+    {
+      "prompt": "I need the address of the routine that computes experience gain",
+      "expect": "no-trigger",
+      "why": "guest-re. Static analysis of the extracted binary, not manipulation of the container it came in."
+    },
+    {
+      "prompt": "korean labels on my own HUD buttons render as blank space",
+      "expect": "no-trigger",
+      "why": "android-host. The host's own ASCII bitmap font, unrelated to anything inside the game archive."
+    },
+    {
+      "prompt": "what's the first packet the client sends after it connects",
+      "expect": "no-trigger",
+      "why": "server-revival. Wire protocol."
+    },
+    {
+      "prompt": "gradle is failing with a duplicate class error from kotlin-stdlib",
+      "expect": "no-trigger",
+      "why": "port-shipping. Build dependency graph."
+    },
+    {
+      "prompt": "the sprite atlas decodes but the last few bytes are left over and the images look shifted",
+      "expect": "no-trigger",
+      "why": "guest-re. Asset decoding, where 'consumed == filesize' is the governing assertion. archive-prep only ships the record brute-forcer for length-prefixed tables; per-title image formats are guest-re's."
+    }
+  ]
+}

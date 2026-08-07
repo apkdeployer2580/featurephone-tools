@@ -1,0 +1,75 @@
+{
+  "skill": "port-shipping",
+  "evals": [
+    {
+      "prompt": "UnsatisfiedLinkError the moment the app starts",
+      "expect": "trigger",
+      "why": "The three-way native-library name agreement — Cargo's lib name, the loadLibrary call, and the manifest's lib name — failing at runtime with a perfectly clean build. Top of the build troubleshooting table."
+    },
+    {
+      "prompt": "the apk installs on my phone but my friend gets App not installed",
+      "expect": "trigger",
+      "why": "Distribution: signing, ABI split, or minSdk. The output filename and the certificate fingerprint are the answer to 'can anyone else install this'."
+    },
+    {
+      "prompt": "I want to start a fresh project for a different game, what do I copy",
+      "expect": "trigger",
+      "why": "Scaffolding. Deliberately owned here rather than by the router, because the difficulty is entirely the rename blast radius and the runtime-only failures it produces — build-system knowledge."
+    },
+    {
+      "prompt": "my release build is talking to a development address and I have no idea how",
+      "expect": "trigger",
+      "why": "Build-time configuration resolved at compile time to a silent fallback because the variable was not exported for the compiler. The defence is scanning the produced shared object, not re-reading the build script."
+    },
+    {
+      "prompt": "gradle fails with a duplicate class error mentioning kotlin-stdlib",
+      "expect": "trigger",
+      "why": "Dependency graph conflict in the Android build. Straight build-pipeline work."
+    },
+    {
+      "prompt": "what's actually safe to push to github here, I don't want to leak anything",
+      "expect": "trigger",
+      "why": "The publish audit. Working tree AND every ref, because deleting a file does not delete it from history, and the categories accumulate without anyone deciding to add them."
+    },
+    {
+      "prompt": "my debug apk came out at like 250 megabytes",
+      "expect": "trigger",
+      "why": "Unstripped native symbols in a debug build. A build-stage question with a build-stage fix."
+    },
+    {
+      "prompt": "gradle keeps producing app-release-unsigned.apk",
+      "expect": "trigger",
+      "why": "Signing configuration resolution order — environment first, then gradle properties — with the keystore kept outside the repository."
+    },
+    {
+      "prompt": "boots to a black screen with nothing logged",
+      "expect": "no-trigger",
+      "why": "emulator-core. Runtime failure inside the vendored core; the build succeeded."
+    },
+    {
+      "prompt": "I need the offset of the field that stores gold",
+      "expect": "no-trigger",
+      "why": "guest-re."
+    },
+    {
+      "prompt": "my HUD buttons overlap the status bar area",
+      "expect": "no-trigger",
+      "why": "android-host. Placement against obstacles."
+    },
+    {
+      "prompt": "how do I decode the reply frames the server used to send",
+      "expect": "no-trigger",
+      "why": "server-revival. Protocol RE."
+    },
+    {
+      "prompt": "the game archive is rejected before anything runs",
+      "expect": "no-trigger",
+      "why": "archive-prep. Container fault."
+    },
+    {
+      "prompt": "cargo test blows up instantly for the app crate and I can't run any of my logic tests",
+      "expect": "trigger",
+      "why": "Testing gates. The app crate cannot be host-tested because of its platform link graph; the answer is the dependency-free selftest harness that includes the real source, plus the headless probe as a device-free gate. Owned here because it is a build/CI concern, and cross-referenced from the shared selftest convention."
+    }
+  ]
+}

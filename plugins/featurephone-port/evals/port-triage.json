@@ -1,0 +1,70 @@
+{
+  "skill": "port-triage",
+  "evals": [
+    {
+      "prompt": "I want to port an old Korean phone game",
+      "expect": "trigger",
+      "why": "THE AMBIGUOUS CASE. No platform, no file, no symptom, no phase. Every phase skill could plausibly claim a piece of this and none of them should. port-triage exists precisely to absorb it: classify the dump, pick the backend, then dispatch. If a phase skill wins this prompt, the router's description is losing to a sibling's and needs the phase skill's triggers narrowed."
+    },
+    {
+      "prompt": "found my old feature phone game jar in a backup, no idea where to even start with this",
+      "expect": "trigger",
+      "why": "Entry-point question with a dump in hand and no phase named. Chapter 0."
+    },
+    {
+      "prompt": "what's the whole process for turning a wipi game into an android app? like start to finish",
+      "expect": "trigger",
+      "why": "Asks for the pipeline itself, not for work inside one phase. The 20-chapter list with exit criteria is port-triage's and nobody else's."
+    },
+    {
+      "prompt": "i have a .kdp from an old carrier download page, is this thing even usable",
+      "expect": "trigger",
+      "why": "Names a carrier download package extension and asks a feasibility question. Triage classifies and answers whether it is a supported dump at all before archive-prep gets a turn."
+    },
+    {
+      "prompt": "does this game run actual arm code or is it java bytecode? changes what tools I need right",
+      "expect": "trigger",
+      "why": "The AOT-ARM vs JVM-bytecode fork is a triage decision that determines whether the entire static RE toolkit applies. Answering it wrong wastes days, so it lives in the router."
+    },
+    {
+      "prompt": "picking this port back up after like six months, I have no memory of where I stopped",
+      "expect": "trigger",
+      "why": "Resumption. The router must locate the user in the chapter list from evidence rather than restarting at chapter 0. Explicitly in the description so returning users land here."
+    },
+    {
+      "prompt": "I'm seeing a weird problem and honestly I don't know which part of this is responsible",
+      "expect": "trigger",
+      "why": "Ownership question with no symptom detail. The merged fault dictionary and routing table are triage's job. Once the symptom is stated the answer becomes a phase skill's."
+    },
+    {
+      "prompt": "the app descriptor in my archive has windows line endings and the loader rejects it",
+      "expect": "no-trigger",
+      "why": "archive-prep. A specific, named archive fault with a known repair. The router adds nothing but a hop."
+    },
+    {
+      "prompt": "it loads the archive fine and then just shows a black screen, no error anywhere",
+      "expect": "no-trigger",
+      "why": "emulator-core. The archive already loads, so triage's classification step is answered; this is failure #1 of the six, almost certainly a wall-clock host now()."
+    },
+    {
+      "prompt": "how do I find the function that writes the save file inside the game binary",
+      "expect": "no-trigger",
+      "why": "guest-re. Naming a guest-binary artefact to locate is the clearest possible phase signal."
+    },
+    {
+      "prompt": "my on-screen dpad sticks down after I lift my finger",
+      "expect": "no-trigger",
+      "why": "android-host. Held-key release discipline in the touch layer; no routing decision involved."
+    },
+    {
+      "prompt": "the client just sits on the waiting-for-server popup and never times out",
+      "expect": "no-trigger",
+      "why": "server-revival. A live-server symptom; the optional wire chapter owns it end to end."
+    },
+    {
+      "prompt": "gradle produced app-release-unsigned.apk and I don't know why",
+      "expect": "no-trigger",
+      "why": "port-shipping. Signing configuration resolution; build-system knowledge, not routing."
+    }
+  ]
+}

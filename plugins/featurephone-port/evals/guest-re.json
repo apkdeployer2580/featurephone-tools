@@ -1,0 +1,75 @@
+{
+  "skill": "guest-re",
+  "evals": [
+    {
+      "prompt": "where is the save function in the guest binary",
+      "expect": "trigger",
+      "why": "Canonical locate-a-routine request. The recipe is string-to-code chaining plus serializer anchoring, and it is the first thing almost every port needs."
+    },
+    {
+      "prompt": "how do I figure out which offset in the player struct holds current hp",
+      "expect": "trigger",
+      "why": "Struct-offset discovery, and the place where the two-independent-derivations rule bites. A single derivation that happens to look right is the most expensive kind of mistake in this phase."
+    },
+    {
+      "prompt": "there's a hardcoded 5 in the game's level requirement and I want it to be 10, how do I change it",
+      "expect": "trigger",
+      "why": "Patching. Owns read-verify-then-write, idempotence across new-game/continue/death, Thumb immediate re-encoding, and the immediate-width bound that decides what the feature can even be."
+    },
+    {
+      "prompt": "can I call one of the game's own functions from my rust code, or is that asking for trouble",
+      "expect": "trigger",
+      "why": "Host-initiated guest calls: the Thumb bit, verifying you have a real function and not a jump-table arm, the three-state result cell, timeouts, and the game's own precondition as the gate."
+    },
+    {
+      "prompt": "I need to disassemble a chunk of the client binary but every disassembler I try gives garbage after a while",
+      "expect": "trigger",
+      "why": "Interleaved literal pools defeating a naive linear sweep. The resilient decode mode and the file-offset convention are this skill's tooling."
+    },
+    {
+      "prompt": "what's a relocation delta and how do I find mine? the pointers stored in the image don't point anywhere sensible",
+      "expect": "trigger",
+      "why": "Address model, constant four of four. Solve by intersection, then validate corpus-wide against controls — and pin the UNIT, because getting that wrong makes every downstream tool lie consistently."
+    },
+    {
+      "prompt": "I want to use a few bytes of the game's own memory as scratch space, how do I know nothing else uses it",
+      "expect": "trigger",
+      "why": "Proving a code range dead. Carries the correction that the first reachability sweep was wrong because it did not follow bl, which Thumb-1 uses as a long branch."
+    },
+    {
+      "prompt": "my headless run finishes but I can't get it to print the pixel comparison",
+      "expect": "trigger",
+      "why": "The probe contract, including the correction that the differential-render check is gated on an explicit dump-frame list — the reference implementation's own documented invocation could not print anything."
+    },
+    {
+      "prompt": "the archive has CRLF in the descriptor and the loader won't take it",
+      "expect": "no-trigger",
+      "why": "archive-prep. Container repair, before any binary is extracted."
+    },
+    {
+      "prompt": "it logs Unimplemented and then hard-stops",
+      "expect": "no-trigger",
+      "why": "emulator-core. A missing platform stub in the vendored core, not anything about the guest image."
+    },
+    {
+      "prompt": "two of my HUD buttons end up on top of each other after I rotate the phone",
+      "expect": "no-trigger",
+      "why": "android-host. The placement resolver and its overlap invariant."
+    },
+    {
+      "prompt": "what does the server send back when the client asks for the item list",
+      "expect": "no-trigger",
+      "why": "server-revival. Reply layouts are reverse-engineered from the client's handlers, which is protocol work with its own vocabulary."
+    },
+    {
+      "prompt": "versionCode didn't increment and play rejected my upload",
+      "expect": "no-trigger",
+      "why": "port-shipping. Release discipline."
+    },
+    {
+      "prompt": "how do I generate the bitmap glyphs for the korean words my overlay draws",
+      "expect": "no-trigger",
+      "why": "android-host. Host-side text rendering; nothing to do with the guest image."
+    }
+  ]
+}

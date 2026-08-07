@@ -1,0 +1,75 @@
+{
+  "skill": "server-revival",
+  "evals": [
+    {
+      "prompt": "the official servers were shut down years ago, can I just run my own",
+      "expect": "trigger",
+      "why": "The premise of the whole optional chapter. Answer is yes, without patching the guest: redirect connect at the emulator's socket layer."
+    },
+    {
+      "prompt": "client sits on the waiting-for-server popup forever and never gives up",
+      "expect": "trigger",
+      "why": "The blocking-state symptom. There is one reply that clears it, and finding that specific reply is the highest-value single result of protocol RE."
+    },
+    {
+      "prompt": "I captured some bytes the game sends but I have no idea how to read them",
+      "expect": "trigger",
+      "why": "Framing. Triangulate three independent ways — receive pump, captured bytes, send-side serializer — and never assume payload endianness from the header's."
+    },
+    {
+      "prompt": "how do I make the game connect to my own machine instead of the address baked into it",
+      "expect": "trigger",
+      "why": "Connect redirect at the host socket layer, runtime-configurable from day one. Explicitly not a guest patch."
+    },
+    {
+      "prompt": "the online storage feature is dead, I want to bring it back",
+      "expect": "trigger",
+      "why": "A named server-dependent feature. Determining which features require a live server is the cheap test for whether this chapter applies at all."
+    },
+    {
+      "prompt": "my server replies and then the client immediately drops the connection",
+      "expect": "trigger",
+      "why": "A reply-layout or pacing failure: an unclamped fixed array in the client whose bound is a SERVER obligation, or answering faster than the client's completed-frame ring can absorb."
+    },
+    {
+      "prompt": "if I put TLS in front of this, does the client actually check the certificate",
+      "expect": "trigger",
+      "why": "Pinning versus CA validation, and the fact that pinning is the stricter of the two when you own both endpoints."
+    },
+    {
+      "prompt": "I want to poke at replies by hand while the game is running instead of rebuilding my server every time",
+      "expect": "trigger",
+      "why": "The hot-reloadable request-to-reply override table, mtime-gated so it is editable mid-session — and shipped OFF by default, because a wildcard entry hijacks every user."
+    },
+    {
+      "prompt": "boots to black, nothing in the log",
+      "expect": "no-trigger",
+      "why": "emulator-core. Nothing has reached the network."
+    },
+    {
+      "prompt": "where's the formula that computes damage",
+      "expect": "no-trigger",
+      "why": "guest-re. Static RE with no wire involvement."
+    },
+    {
+      "prompt": "the apk installs on my phone but not on my friend's",
+      "expect": "no-trigger",
+      "why": "port-shipping. Signing, minSdk or ABI."
+    },
+    {
+      "prompt": "archive won't load, says the main class isn't there",
+      "expect": "no-trigger",
+      "why": "archive-prep. Descriptor and container."
+    },
+    {
+      "prompt": "two touch buttons overlap after I move one of them",
+      "expect": "no-trigger",
+      "why": "android-host. Placement resolver."
+    },
+    {
+      "prompt": "how do I find where in the binary the send routine actually is",
+      "expect": "no-trigger",
+      "why": "AMBIGUITY PROBE, and the sharpest boundary in the plugin. Locating a routine is guest-re's static toolkit; what to DO with the serializer once found — anchor request enumeration on it — is server-revival's. Either landing is workable if the two skills cross-reference; a hard grab by server-revival with no handoff to the static tools is the failure mode to watch for."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+# This repository must never contain game content, keys, or infrastructure values.
+# These rules are the second line of defence; the first is `tools/publish_audit.py`.
+
+# Game archives and dumps of any kind — guarded by extension AND by name.
+*.jar
+*.jad
+*.kdp
+*.msd
+client.bin*
+binary.mod
+*_fixed.zip
+work/
+
+# Built artifacts that can embed a game archive or a baked server address.
+*.apk
+*.aab
+*.so
+*.dex
+
+# Signing material.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+keystore.properties
+signing.properties
+
+# Server state, transcripts and captures — these hold account identifiers.
+*.db
+*.db-shm
+*.db-wal
+*.jsonl
+*.pcap
+
+# Per-title configuration a contributor may create while testing the tools.
+target.toml
+
+# Local scratch.
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.DS_Store
+*.log

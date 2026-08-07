@@ -1,0 +1,75 @@
+{
+  "skill": "emulator-core",
+  "evals": [
+    {
+      "prompt": "my game boots to a black screen and there's no error",
+      "expect": "trigger",
+      "why": "Failure #1 of six, and the single most common first symptom: the host clock is a wall clock, the guest idles on a platform timer, and the virtual clock never advances. Silence with no error is the diagnostic — a fault that logs belongs somewhere else."
+    },
+    {
+      "prompt": "it keeps printing Unimplemented with a number and a name and then everything stops",
+      "expect": "trigger",
+      "why": "Failure #2: a fatal platform stub. The only one of the six whose values are game-specific; the recipe for adding the function is core work."
+    },
+    {
+      "prompt": "panic on threads.get().unwrap() the very first time I call into the game from my own code",
+      "expect": "trigger",
+      "why": "Failure #3: the calling thread was never attached to the JVM. The guard that fixes it is port-verbatim and lives in the vendored core."
+    },
+    {
+      "prompt": "runs great in towns, drops to a slideshow on the big outdoor maps",
+      "expect": "trigger",
+      "why": "Failure #4: a full-framebuffer round trip per draw call. Scales with draw-call count, so it appears only on busy scenes — which is why it gets misdiagnosed as a device problem."
+    },
+    {
+      "prompt": "it dies with AllocationFailure after twenty or thirty minutes of playing, every time",
+      "expect": "trigger",
+      "why": "Failure #5: a guest allocator that never coalesces adjacent free blocks. The delay before it fires is the tell, and the heap gauge distinguishes fragmentation from a real leak."
+    },
+    {
+      "prompt": "SIGSEGV and the message says stack pointer is not in a rw map",
+      "expect": "trigger",
+      "why": "Failure #6: reporting an allocation failure by allocating an exception, recursively, until the native stack is gone. Verbatim symptom text in the description."
+    },
+    {
+      "prompt": "right after a platform call it branches to address zero and dies",
+      "expect": "trigger",
+      "why": "Short positional dispatch table. Adding a function without padding the table to its declared length turns an in-range index into a read of zero, which is then called."
+    },
+    {
+      "prompt": "I need to add a graphics function the emulator doesn't implement yet",
+      "expect": "trigger",
+      "why": "Extending the emulator API surface: the three sites that must agree, and the table-padding trap. Explicit scope."
+    },
+    {
+      "prompt": "the emulator refuses the archive before it ever starts running",
+      "expect": "no-trigger",
+      "why": "archive-prep. Nothing has executed yet, so no core failure can be involved."
+    },
+    {
+      "prompt": "where in the binary is the check that says you can't equip this yet",
+      "expect": "no-trigger",
+      "why": "guest-re. Finding a refusal gate in the guest is static RE, even though the fix may later be applied through the emulator."
+    },
+    {
+      "prompt": "my virtual joystick occasionally fires a diagonal I didn't press",
+      "expect": "no-trigger",
+      "why": "android-host. Latched-direction hysteresis in the touch layer, above the Emulator trait boundary."
+    },
+    {
+      "prompt": "how do I sign the release apk without putting the keystore in the repo",
+      "expect": "no-trigger",
+      "why": "port-shipping. Build and release."
+    },
+    {
+      "prompt": "the client closes the connection immediately after my server sends a valid-looking reply",
+      "expect": "no-trigger",
+      "why": "server-revival. A reply-layout or reply-pacing problem, diagnosed against the client's own handler."
+    },
+    {
+      "prompt": "every save slot reads back as empty even though the game says it saved",
+      "expect": "trigger",
+      "why": "AMBIGUITY PROBE. Named in this skill's description because the usual cause is the emulator's database backend resolving reads through a different path than writes. It can also be the host's storage layer, so android-host landing is an acceptable outcome; guest-re or port-shipping taking it is not. The pass condition is that whichever of the two lands cross-references the other rather than improvising."
+    }
+  ]
+}

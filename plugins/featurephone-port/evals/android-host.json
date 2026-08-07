@@ -1,0 +1,75 @@
+{
+  "skill": "android-host",
+  "evals": [
+    {
+      "prompt": "the minimap keeps getting clicked by itself",
+      "expect": "trigger",
+      "why": "A control firing without user intent. Cause is in the ordered hit-test chain plus touch identity: the two edges of one touch each get a decision, so one gesture is counted twice. One of the three touch-identity sets exists specifically to kill this."
+    },
+    {
+      "prompt": "big black bars on the sides and the game only fills a third of my screen",
+      "expect": "trigger",
+      "why": "Letterboxing and scale. The guest's fixed resolution against an arbitrary device window, resolved in the blit path."
+    },
+    {
+      "prompt": "english text on my overlay is fine but korean comes out as empty space",
+      "expect": "trigger",
+      "why": "The host's built-in bitmap font is ASCII only. Fix is the closed-set CJK glyph table, and the coverage assertion that turns a missing glyph into a test failure instead of a hole on screen."
+    },
+    {
+      "prompt": "I want players to be able to drag the buttons wherever they like and have it stick",
+      "expect": "trigger",
+      "why": "The on-device layout editor and the placement model: window fractions and percent-of-builtin, never pixels, resolved to a fixpoint so nothing silently ends up under an obstacle."
+    },
+    {
+      "prompt": "my dpad sticks in one direction after I lift my finger",
+      "expect": "trigger",
+      "why": "Held-key release discipline and the latched-direction joystick with keyup-before-keydown ordering."
+    },
+    {
+      "prompt": "saves vanish whenever android kills the app in the background",
+      "expect": "trigger",
+      "why": "App-private storage: synchronous writes so the bytes are on disk when the call returns, plus keeping the on-device layout identical to the headless probe's."
+    },
+    {
+      "prompt": "how do I pop up a real text input box from rust, the game needs a name typed in",
+      "expect": "trigger",
+      "why": "Text INPUT goes to platform dialogs over JNI. Carries the trap that the JNI context hands you the Application, not the Activity, so the class must be loaded through getClassLoader()."
+    },
+    {
+      "prompt": "pinch to resize a control applies the zoom twice and it jumps",
+      "expect": "trigger",
+      "why": "Deciding twice on one gesture, the same family as the self-clicking minimap. The rule is never to decide on both edges of one touch."
+    },
+    {
+      "prompt": "black screen with no error at all, nothing renders anywhere",
+      "expect": "no-trigger",
+      "why": "emulator-core. Total silence with no error is the virtual-clock failure, below this layer. If the host layer were at fault there would be a surface, just the wrong contents."
+    },
+    {
+      "prompt": "I need to find the address of the inventory array inside the game",
+      "expect": "no-trigger",
+      "why": "guest-re. Static analysis of the guest image."
+    },
+    {
+      "prompt": "how do I rewrite a data table inside the game jar without breaking the other entries",
+      "expect": "no-trigger",
+      "why": "archive-prep. Surgical repacking."
+    },
+    {
+      "prompt": "my release build is somehow still pointing at a localhost address",
+      "expect": "no-trigger",
+      "why": "port-shipping. Build-time configuration resolving to a fallback because the variable was not exported when the compiler ran — caught by scanning the produced artifact, not the build script."
+    },
+    {
+      "prompt": "the game connects but hangs forever waiting for a reply from my server",
+      "expect": "no-trigger",
+      "why": "server-revival. Blocking-state semantics: exactly one reply clears the wait, and finding it is protocol work."
+    },
+    {
+      "prompt": "the game stutters badly whenever there are lots of sprites on screen",
+      "expect": "no-trigger",
+      "why": "emulator-core. Per-draw-call framebuffer round trips in the graphics backend. A useful discrimination test, because 'stutter' feels like a UI-layer complaint and is not."
+    }
+  ]
+}
