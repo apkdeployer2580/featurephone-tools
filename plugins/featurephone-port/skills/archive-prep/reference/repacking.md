@@ -138,7 +138,7 @@ assert changed == set(EXPECTED_INDICES), f"changed {changed} != expected {set(EX
 
 **(A)** Four rules, all learned the same way:
 
-1. **`--apply` is opt-in.** Without it, write `<archive>.zip.new` and print the verification report. Default-destructive tooling on someone's only copy of a licensed dump is indefensible.
+1. **`--apply` is opt-in.** Without it, write `<archive>.zip.new` **through the same path function as the backups** (rule 3 — a dry-run output beside the archive ships inside the artifact exactly like a backup does) and print the verification report. Default-destructive tooling on someone's only copy of a licensed dump is indefensible.
 2. **Always rebuild from the PRISTINE copy, never from the shipped file.** The first `--apply` takes that pristine copy — and only ever from an artifact that really is pristine, because backing up an already-patched archive poisons the fallback source forever. Refuse to overwrite an existing backup.
 3. **Backups live OUTSIDE every directory the build packages, at a path computed by one shared function** that every tool touching the archive imports. Not "next to the target", and not "move it by hand after each run".
 4. **Backups are the same licensed bytes.** They must be gitignored **by name** as well as by path — a backup with a suffix that is not `.zip` defeats a path-only ignore rule. The reference port needed a dedicated follow-up commit for exactly this leak.

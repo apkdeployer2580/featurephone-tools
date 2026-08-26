@@ -86,18 +86,11 @@ patch or hook table **silently falls back to its generic entries** when the hash
 game then runs correctly *without its hooks*. The tell is a **boot log line** naming how many entries
 installed, not a performance gauge.
 
-⚠ **(A) The in-game splash version is NOT the package version.** They are two independent numbering
-schemes and they disagree. **(B)** In the reference pair, one build's descriptor says `01.00.07`
-while its splash screen says `VER 1.0.4`; the other pair is `01.00.04` / `VER 1.0.1`.
-
-> **REFUTED.** *Previously believed, and written into a comment in the reference port's own patch
-> table:* that the build whose splash reads like the higher version was the one being shipped.
-> *Refuted by:* hashing the native member that the shipping archive actually contains.
-> *Why the wrong reading was attractive:* both numbers are four digits, both look like versions,
-> and the one you see while playing is the splash. Nothing in either artefact says which scheme it
-> belongs to.
-> *Consequence if carried forward:* every address in the notes is attributed to the wrong revision,
-> and the hooks you "verified" were never installed on the build you shipped.
+⚠ **(A) Do not identify a build by a version string.** The descriptor's version field and the
+in-game splash version are different numbering schemes that do not agree, and the reference port
+shipped a wrong claim about which archive was live because of exactly that. The trap, with both
+pairs of numbers and its refutation:
+[multi-build.md §1](../../guest-re/reference/multi-build.md#1-three-levels-of-build-identity--hash-the-native-member-first).
 
 Deriving a second build's values from the first, and the table architecture that carries both:
 [guest-re/reference/multi-build.md](../../guest-re/reference/multi-build.md) and

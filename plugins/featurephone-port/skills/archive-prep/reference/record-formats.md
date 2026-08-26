@@ -23,7 +23,7 @@ Tags: **(A)** generic · **(B)** worked example from the reference port · **(C)
 
 Before you edit any member of the jar: **is this file's layout tolerant of a length change, or not?** Get this wrong and the archive still boots, the file still parses, and the game shows garbage for the next fifty records. There is no crash to tell you.
 
-The answer is decided by one property — whether anything in the file, or in the guest, addresses records by **byte offset**.
+The answer is decided mostly by one property — whether anything in the file, or in the guest, addresses records by **byte offset** — and partly by a second one that is invisible in the file and lives only in the guest's parser: whether some field's *length* is computed by scanning for a byte your edit is about to remove (§3).
 
 ## 2. The two layout families
 
@@ -63,7 +63,7 @@ Confirm with §5, never with a glance.
 
 > Every string is LENGTH-PREFIXED and there is no offset table in the file, so changing a string's length is safe **as long as the record COUNT and ORDER are preserved**.
 
-Three conditions, all necessary:
+**Five** conditions, all necessary. The first three are the classic statement of the theorem; the fourth used to be stated wrongly in this file and the fifth was missing entirely.
 
 1. **Length-prefixed** — the reader derives each field's extent from the file, not from a constant.
 2. **No offset table** — nothing else in the file encodes a position.
