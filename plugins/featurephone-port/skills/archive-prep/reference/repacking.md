@@ -35,6 +35,8 @@ Tags: **(A)** generic · **(B)** worked example from the reference port · **(C)
 
 If you find yourself repacking to change something the host could decide, stop: the host is where per-user, reversible, updatable decisions belong. The archive is where the *publisher's static data* lives.
 
+**(A) This file describes ONE tool writing the archive.** The moment a second generator writes it — a price table, a generated catalogue, an extracted font — the failure modes change completely, **both tools report success in every one of them**, and the answer is member ownership plus a byte-comparing `--check`: [generated-assets.md](generated-assets.md). Run that check gate as the **first command of any session that touches assets**.
+
 ## 2. The rebuild primitive
 
 **(A)** The whole of repacking is one function. Read every entry, transform the one you care about, write every entry back with its original metadata.
@@ -102,7 +104,18 @@ assert changed == set(EXPECTED_INDICES), f"changed {changed} != expected {set(EX
 
 **V4 — Every other entry of the outer zip byte-identical.** Same check one level up.
 
-**(A) Then the empirical check:** boot the repacked archive in the headless probe and load a save. A repacked archive that boots is the only evidence you will get that the guest does not verify its own resources (see §9).
+**V5 — Read the member back out of the PACKAGED artifact.** Not out of your tool's output. The packager, a build cache and possibly a different checkout sit between the file you wrote and the file the player runs, and each of them is a place where your edit can fail to arrive. **(B)** One release check opened the built package, confirmed its asset directory held exactly one file, and read the 727-byte member back out of it — closing two independent risks (a stray by-product shipping alongside the archive, and a stale member) in one command.
+
+**(A) Choose the comparison base deliberately, because V3/V4 answer different questions depending on it:**
+
+| base you diff against | question it answers |
+|---|---|
+| the file this run started from | "did *this* run behave?" — necessary, and much weaker than it looks |
+| **the last SHIPPED archive** | "did every **other** producer's members survive?" — this is the release check |
+
+**(B)** The reference port adopted the second as the standing rule after an entire session's asset work was found reverted: diffing the jar members against the previous shipped build is how 41 preserved price rows were confirmed intact after an unrelated tool had rebuilt the archive.
+
+**(A) Then the empirical check:** boot the repacked archive in the headless probe and load a save. A repacked archive that boots is the only evidence you will get that the guest does not verify its own resources (see §9). ⚠ Booting is **not** evidence that the member is *current* — an archive whose data and whose guest constants disagree boots perfectly and dies after the title screen. That class needs the content gate in [generated-assets.md §3](generated-assets.md#3-the-structural-fix-a-byte-comparing---check-that-exits-nonzero) and a long soak run ([testing-and-ci.md](../../port-shipping/reference/testing-and-ci.md) §5).
 
 ## 5. Pitfalls, each with its mitigation
 
@@ -114,20 +127,39 @@ assert changed == set(EXPECTED_INDICES), f"changed {changed} != expected {set(EX
 | **CRC / signature** | the zip CRC is recomputed by the writer. There is **no jar signature**: `META-INF/` holds only `MANIFEST.MF`, no `.SF`, no `.RSA` | nothing to do |
 | **guest self-integrity check** | **unproven** either way. The reference port flagged this honestly and never resolved it | boot the repacked archive and load a save; treat "boots into a corruption screen" as the tell |
 | **size drift** | rebuilding with a different zip implementation changes deflate parameters and drops extra fields. **(B)** measured: a rebuilt jar shrank 1,899,048 → 1,877,743 B with **no content change at all** | **"size unchanged" is not a valid sanity check.** Use member-wise byte compare (V3/V4) |
-| **not idempotent** | re-running dies on V2 | restore from backup first; see §6 |
+| **re-running the tool** | a transform that edits the shipped file in place is not idempotent and dies on V2; one that rebuilds from pristine is idempotent by construction | rebuild from pristine (§6). If a pristine-sourced tool refuses on a record count, the pristine copy has been **deleted** |
+| **a second tool writes the archive** | both tools print a clean report while silently reverting each other's members | declare the order and the ownership; gate with a byte-comparing `--check` — [generated-assets.md](generated-assets.md) |
+| **the archive is gitignored** | asset work does not travel with a commit, so a second checkout ships an input that lags its own source | the check gate is the first command of every asset session (§6) |
 | **encrypted members** | some data members are encrypted with a per-title cipher; a plaintext parser will produce plausible garbage | out of scope. Touch only members you can parse and re-parse. See [record-formats.md](record-formats.md#8-encrypted-members) |
 | **timestamps** | dropping `date_time` makes every entry look changed to downstream tooling | copy it |
 | **the guest image** | rewriting the native member changes its md5 and can make a hash-keyed patch table fatal | never repack the native member |
 
 ## 6. Backups, idempotence and the apply gate
 
-**(A)** Three rules, all learned the same way:
+**(A)** Four rules, all learned the same way:
 
 1. **`--apply` is opt-in.** Without it, write `<archive>.zip.new` and print the verification report. Default-destructive tooling on someone's only copy of a licensed dump is indefensible.
-2. **The first `--apply` drops a backup** next to (not over) the target, and refuses to overwrite an existing backup. Naming it `<archive>.zip.orig` or putting it in `--backup-dir work/backup` are both fine.
-3. **Backups are the same licensed bytes.** They must be gitignored **by name** as well as by path — a backup written outside `assets/` with a suffix that is not `.zip` defeats a path-only ignore rule. The reference port needed a dedicated follow-up commit for exactly this leak. Also keep backups out of any directory the build packages wholesale.
+2. **Always rebuild from the PRISTINE copy, never from the shipped file.** The first `--apply` takes that pristine copy — and only ever from an artifact that really is pristine, because backing up an already-patched archive poisons the fallback source forever. Refuse to overwrite an existing backup.
+3. **Backups live OUTSIDE every directory the build packages, at a path computed by one shared function** that every tool touching the archive imports. Not "next to the target", and not "move it by hand after each run".
+4. **Backups are the same licensed bytes.** They must be gitignored **by name** as well as by path — a backup with a suffix that is not `.zip` defeats a path-only ignore rule. The reference port needed a dedicated follow-up commit for exactly this leak.
 
-**(A) Embrace non-idempotence.** A repack tool that can be safely re-run is a repack tool that cannot tell you whether it already ran. Let V2 fail loudly on the second invocation and make the error message name the backup to restore from.
+> **REFUTED.** *Previously documented in this section:* "The first `--apply` drops a backup **next to** (not over) the target … naming it `<archive>.zip.orig` or putting it in `--backup-dir work/backup` are **both fine**."
+> *Refuted by:* two measurements on the built release package. "Next to the target" is inside the directory the mobile packager consumes wholesale, so the backup shipped **inside the artifact** — 1.76 MB of licensed bytes once, and later 3.53 MB from two by-products. Both measurements: [generated-assets.md §7](generated-assets.md#7-where-by-products-live-and-why-pristine-is-moved-rather-than-deleted).
+> *Why the wrong reading was attractive:* the sentence reads as being about *naming*, and naming genuinely does not matter — the **directory** does, and the two options differ in exactly that. Every downstream gate (build, signature, boot smoke) passes either way; the only tell is artifact size.
+> *Consequence if carried forward:* every release ships a duplicate of the licensed archive the project was careful to gitignore, and hands it to other people.
+
+**(A) Rebuilding from pristine makes the transform idempotent by construction**, which supersedes what this section used to recommend:
+
+> **REFUTED.** *Previously documented in this section:* "Embrace non-idempotence. A repack tool that can be safely re-run is a repack tool that cannot tell you whether it already ran. Let V2 fail loudly on the second invocation."
+> *Refuted by:* a pipeline with two generators, in which the question that matters is not "did *I* already run?" but "**did the other tool's work survive, and does the shipped archive still reflect the tables in this repository?**" Non-idempotence answers neither. The failure that actually ships is staleness, and only a byte-compare detects it.
+> *Why the wrong reading was attractive:* failing loudly *is* a signal, and in a single-tool pipeline with no pristine copy it is the only one available — which is exactly when the old rule is still the right answer.
+> *Consequence if carried forward:* a manual "restore from backup first" step in front of every run, and total silence about every member this tool does not own. The full argument, and the measured double-run idempotence, are in [generated-assets.md §6](generated-assets.md#6-always-rebuild-from-pristine).
+
+**(A) Move the pristine copy, never delete it.** It is the pipeline's only source, and its absence does not announce itself as "the backup is missing" — it surfaces as an unrelated-looking record-count refusal from the transform, because the tool is now reading its own previous output as its input. See F7 in [fault-dictionary.md](fault-dictionary.md#9-f7-repack-refuses-on-the-second-run).
+
+**(A) Add a `--check` mode, and make it the first command of any session that touches assets.** It rebuilds the members this tool **solely owns**, in memory, byte-compares them against the archive that actually ships, exits non-zero on a mismatch and names the regeneration command. A tool's own `--verify` is not a substitute: run the current tool against the pristine source and it reports success while the shipping file still holds last month's content. Ownership, co-owned members, tool order and the canary member: [generated-assets.md](generated-assets.md).
+
+⚠ **(A) The archive is gitignored, so archive work does not travel with a commit.** A project with more than one checkout will eventually ship an input that lags its own source — commit present, result absent. That is why the gate is a command with an exit code and not a convention.
 
 ## 7. Stripping entries
 
@@ -170,13 +202,17 @@ Do the descriptor repair, the name reconciliation and the `P/` strip in **one** 
 
 Before `--apply`:
 
+- [ ] Every generator's `--check` was run **first**, and was clean.
 - [ ] Working on a copy; the original dump is untouched and backed up outside the repo.
+- [ ] The transform sources **pristine**, not the shipped archive; the pristine copy still exists (moved, never deleted).
 - [ ] Transform is format-aware, not a byte-offset splice.
 - [ ] V1 record count matches.
 - [ ] V2 changed-index set matches **exactly**.
 - [ ] V3 all other jar members byte-identical.
 - [ ] V4 all other outer entries byte-identical.
+- [ ] V3/V4 were run against the **last shipped archive**, not only against this run's input — that is what proves the other generator's members survived.
+- [ ] V5 the member reads back correctly out of the **packaged artifact**, and that artifact's asset directory contains nothing else.
 - [ ] Native member untouched (name and bytes).
 - [ ] Descriptor still LF-only and AID still matches the jar basename.
-- [ ] Archive boots headless and, if the change touches saved data, loads a save.
-- [ ] Backup path is gitignored by name **and** by path, and is not inside a directory the build packages.
+- [ ] Archive boots headless and, if the change touches saved data, loads a save. (Booting proves nothing about staleness.)
+- [ ] Backup path is gitignored by name **and** by path, is produced by the one shared path function, and is not inside any directory the build packages.

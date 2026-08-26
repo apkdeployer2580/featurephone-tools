@@ -14,8 +14,8 @@ copy.
 ## Contents
 
 - [1. The default posture](#1-the-default-posture)
-- [2. Two supported distribution shapes](#2-two-supported-distribution-shapes)
-- [3. Fail loudly when the archive is absent](#3-fail-loudly-when-the-archive-is-absent)
+- [2. Three supported distribution shapes](#2-three-supported-distribution-shapes)
+- [3. Fail loudly when the archive is absent — and again when it is stale](#3-fail-loudly-when-the-archive-is-absent--and-again-when-it-is-stale)
 - [4. Never redistribute](#4-never-redistribute)
 - [5. Extracted decryption keys are a separate and worse category](#5-extracted-decryption-keys-are-a-separate-and-worse-category)
 - [6. Offsets and metadata versus content — where the line is](#6-offsets-and-metadata-versus-content--where-the-line-is)
@@ -43,9 +43,9 @@ blocking finding.
 
 State the posture in the **first paragraph** of your README, not in a footnote.
 
-## 2. Two supported distribution shapes
+## 2. Three supported distribution shapes
 
-Both have been done; pick one and document it.
+All three have been done; pick one and write it down.
 
 **(a) Runtime file picker.** The app ships with no game and the user selects their archive at
 launch. This is the cleanest position — the distributed artifact contains nothing licensed at all.
@@ -57,20 +57,78 @@ assuming it exists.
 `app/src/main/assets/<archive>.zip`", the path is gitignored, and a fresh clone therefore cannot
 build a runnable APK. Anyone who builds is someone who already has the archive.
 
+**(c) Sideload-only, to named people.** The build is never published: it is handed to specific
+players, or installed by you. **(B)** The reference port made this an explicit standing decision —
+no public store, ever — and it is the shape most ports of commercial titles land in.
+
 **Bundling the archive into a distributed APK is a private-build option, not the default the
 methodology teaches.** If you do it for yourself, understand that the APK now embeds licensed
 content *and* your baked configuration, which is why a build output directory is itself a leak
 vector (§4).
 
-## 3. Fail loudly when the archive is absent
+### 2a. What the sideload-only decision changes — and what it does not
+
+> **★ (A) Choosing not to publish on any public store changes what may be REFERENCED on your own
+> machine. It changes nothing about what may be COMMITTED.**
+
+Tools, notes, addresses, offsets, coordinates and format descriptions are publishable either way
+(§6). Extracted art, audio, fonts, string tables and data binaries are not publishable either way —
+**regardless of which title they came from, or how privately you use them.** The store decision
+removes one risk vector; it does not license redistribution, and **a repository is redistribution.**
+
+**(B)** Applied in practice on the reference port, for a second title in the same repository: the RE
+toolkit, the format notes and the container offsets were committed, while every extracted asset
+stayed in a scratch directory and a disassembler database was handed over as a file rather than
+committed. Two derivations that the rule is real: the written policy, and the observable split in
+what the repository actually tracks.
+
+**(A) The failure runs in both directions.** A porter who conflates the two rules either
+over-restricts — refuses to reference assets they legitimately hold, and so cannot build anything —
+or under-restricts, and commits the extracted art because "we are not selling it".
+
+### 2b. The discipline sideload does *not* relax
+
+Sideloading removes the store's **review**. It removes none of the operating system's **installer**
+rules: `versionCode` must still increase, the signing certificate must stay byte-identical forever,
+and the applicationId is still the on-device data path. "There is no store to reject it" is never a
+reason to skip versionCode automation or keystore care — you meet the installer's refusal instead,
+at the moment you are handing someone a build. Posture, handout manifest and recall ledger:
+[../../port-shipping/reference/distribution-and-recall.md](../../port-shipping/reference/distribution-and-recall.md).
+
+A store listing, if you ever choose one, additionally forces you to publish **listing imagery** —
+which for a port is derived from the original's art, and is exactly what §4 refuses — plus a store
+identity and a content rating. That is a separate decision from the build, not a continuation of it.
+
+## 3. Fail loudly when the archive is absent — and again when it is stale
 
 **(A) The most important hardening a public template can have.** Android's asset directory is
 packaged wholesale, including when it is empty — so a missing archive produces a clean build, a
 successful install, and a black screen with an error line buried in the log.
 
-Add a build-time check that the expected asset exists and fails the build with the exact path it
-wanted. **(B)** The reference project did not have one, and a fresh clone silently produced an
-APK with no game.
+Add a build-time check that the expected asset exists, **ahead of the expensive native build**, and
+make it a **hard failure** naming the exact path it wanted — not a warning, which scrolls past in a
+build that ends in success.
+
+**(B) The gate exists because the failure shipped first.** A build produced on a second machine's
+clone had no archive at all: the packager took the empty directory, the build reported success, the
+signature verifier passed, the install succeeded, and the app aborted on its first log line — and it
+was handed to a user in that state. The check was added afterwards, with the incident written into
+the comment above it. That is stronger evidence than the earlier form of this paragraph ("the
+reference project did not have one") could ever be: every gate upstream of the phone passes, so
+nothing in a conventional pipeline notices.
+
+### 3a. Presence is not correctness
+
+**(A) A second, worse failure hides behind the first: an asset that is PRESENT but STALE.** It
+survives the existence check, the signature verification and a boot smoke test, because the game
+starts, shows its title, and dies afterwards. **(B)** Ten consecutive releases of the reference port
+shipped that way.
+
+The gate for it is a byte-comparing content check — rebuild the derived member in memory from the
+pristine original and compare, exiting non-zero — plus a long headless soak asserting zero fatal
+errors. Both:
+[../../archive-prep/reference/generated-assets.md](../../archive-prep/reference/generated-assets.md)
+and [../../port-shipping/reference/build-script.md](../../port-shipping/reference/build-script.md) §2.1.
 
 ## 4. Never redistribute
 
@@ -82,6 +140,7 @@ Not in a repository, not in a release artifact, not in an issue attachment, not 
 | **derived copies with different names** | `<archive>.zip.pre-rename`, `<archive>.orig`, backups written by your own tools, anything under an `asset_backup/` directory |
 | the extracted guest binary | `client.bin*`, `binary.mod`, the relocated image dump |
 | decoded assets | sprite atlases, icon atlases, tile sets, palettes, audio, decoded map data |
+| **generated files that CONTAIN those assets** | a generated **source file** holding the game's font bitmaps; a packed atlas blob committed for a compile-time include. Same bytes, different extension — and invisible to an ignore rule written for archives |
 | dumped text | string tables, item/enemy/dialogue text dumps, an `ids.txt` of the game's own strings |
 | title art and anything derived from it | launcher icons drawn from the game's logo, store listing screenshots, promotional graphics |
 | **build outputs that embed any of the above** | `*.apk`, `*.aab`, and a `dist/` directory. An APK embeds the archive *and* your baked host and pin, so a string purge cannot succeed while build outputs are tracked. |
@@ -131,7 +190,23 @@ is not. The distinction that has held up in practice:
 - the *contents* of those records: item names, dialogue, enemy stats as a table you dumped;
 - an image produced by running your decoder over the game's assets;
 - a text table regenerated from the game's own resources, even if you reformatted it;
+- **a generated source file carrying those bytes** — a font table baked into a `.rs`/`.c`/`.py`
+  array is licensed content that happens to compile;
 - a fixture file for your tests that is a slice of the real archive.
+
+**(A) The rule that resolves this cleanly, because a port generates derived content by design:**
+
+> A generated artifact derived from **the archive** is a **build product** — gitignored, produced at
+> build time from the user's own archive, with a `--check` that proves it is current. Only a
+> generator whose output derives from **your own source** may commit its output.
+
+**(C) The counter-example, from the reference port itself:** it committed an 83 KB binary sprite
+atlas decoded from the game's art into its crate source tree for a compile-time include, and the
+generator that produced it hardcoded absolute paths on a drive the project's own notes record as
+gone, with no `--check`. That artifact is simultaneously a licensed-content leak into a repository
+that carefully gitignores the archive, **and** un-auditable: there is no way to answer *"does this
+blob match the archive we ship?"* Mechanism and the `--check` shape:
+[../../archive-prep/reference/generated-assets.md](../../archive-prep/reference/generated-assets.md).
 
 The practical test: **could a person who does not own the game use this to obtain the game's
 content?** A format description plus their own copy is fine — they already had the content. A
@@ -160,6 +235,11 @@ client.bin
 *.apk
 *.aab
 dist/
+
+# generated artifacts that CONTAIN licensed bytes — build products, not sources.
+# An ignore rule written for archives does not match a .rs full of font glyphs.
+**/<generated_font>_data.rs
+**/*_atlas.bin
 
 # signing material — the second line of defence behind keeping it out of the repo entirely
 *.jks
@@ -234,6 +314,14 @@ server address, a certificate pin, a keystore path, a device serial and an APK c
 fingerprint. When adapting an internal runbook into public documentation, **rewrite it from the
 parameter table**; do not edit the original file, because you will miss one.
 
+**(A) The app's own diagnostics screen is a disclosure surface too, and it is the one people
+forget.** On a release build it is the *only* channel that can report what the app resolved — the
+debug bridge cannot read app-private storage — so it accumulates exactly the values in the table
+above. It is shown to whoever is holding the phone. Report the **fact** and not the secret: the
+configuration *source* ("baked at build time" / "read from a file"), the mode, a pin's
+presence-or-absence — never the address, never the pin itself.
+[../../port-shipping/reference/on-device-diagnostics.md](../../port-shipping/reference/on-device-diagnostics.md).
+
 ## 10. Other people's data
 
 A dump you obtained may contain the previous owner's saved state — on WIPI platforms, entries
@@ -267,7 +355,9 @@ means someone later "optimises" the step away.
 Run before the first push to a public remote, and again before every release.
 
 - [ ] No game archive, jar, native binary, decoded asset, dumped text table or title-derived art
-      **in the tree or in any ref**.
+      **in the tree or in any ref** — including a **generated source file or blob that carries those
+      bytes**. Every artifact derived from the archive is a gitignored build product with a
+      `--check`.
 - [ ] No build outputs (`*.apk`, `*.aab`, `dist/`) tracked — they embed both content and config.
 - [ ] **No extracted decryption or save-encryption key anywhere**, including in prose, examples
       and tool defaults.
@@ -281,7 +371,10 @@ Run before the first push to a public remote, and again before every release.
       suffixed copies.
 - [ ] Backup branches from any history purge are deleted, reflogs expired, objects pruned; any
       credential that was ever pushed is rotated.
-- [ ] The build **fails loudly** when the game archive is missing.
+- [ ] The build **fails loudly** when the game archive is missing — and every generator's `--check`
+      is clean, because a present-but-stale member passes every other gate here.
+- [ ] The on-device diagnostics screen reports configuration **facts**, not the destination, the pin
+      or any credential.
 - [ ] `LICENSE` and `THIRD_PARTY_NOTICES.md` exist and cover every vendored and bundled component,
       including any copyleft relink obligation.
 - [ ] The README's first paragraph states the bring-your-own-dump posture.

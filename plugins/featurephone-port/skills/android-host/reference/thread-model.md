@@ -112,7 +112,7 @@ enum UserEvent {          // worker -> UI, via EventLoopProxy
     Hud { .. },           //   everything the overlay needs to draw, as plain values
     WidgetFrame(..),      //   a host-rendered guest widget, as pixels
     Popup(..),            //   a modal the worker decided to show
-    Toast(&'static str),  //   transient text, ASCII only (see glyphs-and-text.md)
+    Toast(&'static str),  //   transient text, in whatever face the host draws (glyphs-and-text.md)
 }
 
 enum InputEvent {         // UI -> worker, via mpsc::Sender
@@ -150,9 +150,22 @@ Two things do not fit the enums, and both are `Arc<Atomic*>` shared directly.
 
 **`paused: Arc<AtomicBool>`** — set by the UI on suspend/lock, read at the top of the worker
 loop. When set, the worker drains and **discards** pending input, clears its held-key set,
-sleeps ~50 ms and continues. This is what stops audio and battery burn when the phone is in a
-pocket. Discarding rather than buffering is deliberate: a queue of taps replayed on resume is
-always wrong.
+sleeps ~50 ms and continues. This is what stops battery burn when the phone is in a pocket.
+Discarding rather than buffering is deliberate: a queue of taps replayed on resume is always
+wrong.
+
+**★ (A) The flag has a THIRD consumer, and it is not the worker: the audio render source.** Hand
+the same `Arc` to the audio thread at construction, not only to the worker. The worker pausing is
+what stops *new* sound events; only the render source's own branch stops the sound already
+playing — and its correct semantics there are **freeze, not stop**: emit a silent chunk, do not
+advance the synth, do not drain queued events, keep the output device open.
+[audio-mixing.md](audio-mixing.md#17-the-background-gate-freeze-do-not-stop) owns the reasoning
+(re-opening the device is precisely the operation that fails on some handsets).
+
+One consequence for the rest of the render thread: **any time-based state it consumes — a duck
+envelope, a fade, a countdown expressed in render chunks — must be reset in that paused branch**,
+because the consumer stops consuming while the wall clock does not. Otherwise the envelope is
+parked at its last value for the whole time the app is backgrounded and resumes stale.
 
 **A packed geometry word: `Arc<AtomicU32>`** — the one place the UI's layout arithmetic
 reaches the worker. **(A) The pattern is: the UI owns layout, the worker owns guest memory,
@@ -316,7 +329,7 @@ Consequences to enforce:
 - `read_memory` returns an owned `Vec`. A read of a bad address must return short or empty,
   never panic; every parser therefore checks length before indexing and returns `Option`.
 - **Validate every pointer hop.** A stale handle must yield `None`, not a parse of garbage.
-  See [guest-widgets.md](guest-widgets.md#pointer-hop-validation).
+  See [guest-widgets.md](guest-widgets.md#2-pointer-hop-validation).
 
 `read_memory` / `write_memory` / `call_guest_function` / `call_guest_function_out` are
 **additions to the vendored core**, with defaults that return empty / `false` / fail-the-result

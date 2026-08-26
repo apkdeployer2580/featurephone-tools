@@ -3,6 +3,12 @@
 The first thing a new headless runner needs is a **frame-driven virtual clock**. Without it a
 timer-driven guest boots cleanly, reports no error, and renders black frames forever.
 
+**Scope.** This file owns the **headless** clock — the executor and timer model, the virtual clock
+itself, determinism, and the harness traps around them. On a device the clock is real and the problem
+inverts into **pacing**, where the expensive failure is a host layer rounding the guest's timer period
+up to a grid of its own. §5 gives the device loop's shape and hands the pathology, its instrumentation
+and its three failure modes to [frame-pacing.md](frame-pacing.md).
+
 ## Contents
 
 1. [The executor and timer model](#1-the-executor-and-timer-model)
@@ -86,6 +92,22 @@ from the documented invocation makes every measurement incomparable. `20 ms` (�
 time) is the sane starting value for a title built around 50 ms timers; derive yours from the
 period the guest actually passes to `MC_knlSetTimer`, which the trace stub will show you.
 
+**But that period is a band, not a number (A).** Read it as a distribution before you pick a value:
+
+- It may be a **player-settable option**. **(B)** In the reference port the frame timer measured
+  `ms = 110 − 10 × speed` across a 1..10 in-game speed setting — 100 ms down to 10 ms, a factor of
+  ten, every value of it equally "the period the guest passes to the timer call".
+  `HIGH / CONFIRMED`, by device measurement across the option's whole range.
+- Individual guest **states** request values far outside the play band. **(B)** Modal and list screens
+  in the same title armed **244 ms**, against 20–50 ms in play. That is the game's own decision, not a
+  defect — [frame-pacing.md](frame-pacing.md) §15.
+
+Two consequences. **Pick one value for the harness, and record that the choice fixes the emulated
+game speed for the whole measurement campaign** — runs taken at different `--ms` are not comparable
+and nothing in the output says so. And **never derive a host-side ceiling clamp from the value you
+picked without also giving it a floor**: a clamp fitted to the fast end of the band turns the slow
+states into a stall.
+
 **Seed the clock away from zero.** Sentinel-zero timestamps are endemic in this kind of code
 ("`last == 0` means never armed"), and a clock that starts at 0 turns a first-frame comparison into
 a silent no-op.
@@ -145,6 +167,28 @@ Two rules **(A)**:
 - **Do not copy the three numbers.** They are tuned to one game's tick shape **(C)**. Derive yours
   from the work gauge: pick `TICK_FULL_MS` just under the observed per-tick cost of a busy frame,
   and `FRAME_BUDGET_MS` at the frame time you are willing to ship.
+
+**Two more rules, and the second is the one that stops you wasting a week (A):**
+
+- **Never sleep past the guest's next wake-up.** The shape above says when to stop *ticking*; it says
+  nothing about **sleeping**, and the sleep side is where the whole pacing bug lives. A host that
+  sleeps a fixed pace, or an event pump that sleeps a flat interval whenever its queue empties,
+  silently divides the game's speed. Sleep until the earliest due timer, keep the old flat value only
+  as a **ceiling**, and give it a ~1 ms floor.
+- **Measure host idle before optimising anything further.** A slow screen with the host thread mostly
+  *idle* is not the host's problem. **(B)** After the pacing fixes, the reference port's panel screens
+  still measured 7.5 fps with the host thread **79 % idle** — the remaining cost was the guest's own
+  244 ms timer, which is a guest-patch policy decision and not an emulator defect.
+
+**The pathology this shape does not prevent has its own file.** Two independent host loops, each
+rounding the guest's period up to its own ~16 ms grid, **multiply**. The diagnostic tell is
+counter-intuitive and is why it survives for months: **the whole game is slow while every report names
+one screen.** **(B)** An unconditional sleep in the event pump plus a "nap to fill the frame pace" in
+the worker turned a 20 ms guest timer into a measured **45 ms** — the entire game at **44 % of
+designed speed** — and removing both took the title screen from **22 to 69 fps** and guest throughput
+from 14.6 to 56.2 M instructions/s. `HIGH / CONFIRMED`. The invariant, the two gauges that detect it,
+the direction-of-safety argument that makes the fix shippable without a behavioural A/B, and the two
+other pacing failures are [frame-pacing.md](frame-pacing.md).
 
 ## 6. The executor task gauge
 

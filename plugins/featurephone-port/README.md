@@ -39,14 +39,14 @@ Provenance tags used across every file in this plugin:
 In a Claude Code session:
 
 ```
-/plugin marketplace add <owner>/featurephone-tools
+/plugin marketplace add apkdeployer2580/featurephone-tools
 /plugin install featurephone-port@featurephone-tools
 ```
 
 Non-interactive equivalents:
 
 ```bash
-claude plugin marketplace add <owner>/featurephone-tools
+claude plugin marketplace add apkdeployer2580/featurephone-tools
 claude plugin install featurephone-port@featurephone-tools
 ```
 
@@ -179,7 +179,7 @@ supply this"** list live in `skills/port-triage/reference/prerequisites.md`. Rea
 설치:
 
 ```
-/plugin marketplace add <owner>/featurephone-tools
+/plugin marketplace add apkdeployer2580/featurephone-tools
 /plugin install featurephone-port@featurephone-tools
 ```
 
@@ -208,7 +208,7 @@ every other third-party project named here belongs to its own authors under its 
 
 ## Contributing
 
-Issues and pull requests are welcome at `https://github.com/<owner>/featurephone-tools`.
+Issues and pull requests are welcome at `https://github.com/apkdeployer2580/featurephone-tools`.
 
 Before opening a PR:
 

@@ -18,6 +18,7 @@ Everything here runs offline in seconds against `work/client.bin`, with no emula
 10. [Reading text out of the image](#10-reading-text-out-of-the-image)
 11. [Compiler runtime helpers have no symbols](#11-compiler-runtime-helpers)
 12. [The throwaway-scanner pattern](#12-the-throwaway-scanner-pattern)
+13. [Null results: what each query cannot see](#13-null-results-what-each-query-cannot-see)
 
 ---
 
@@ -52,7 +53,7 @@ Annotating these turns "chase three levels of pointer by hand for every line" in
 python "${CLAUDE_PLUGIN_ROOT}/tools/xref.py" -t target.toml calls 0x199764
 ```
 
-Decode **every** Thumb `BL`/`BLX` halfword-pair in the whole image, sign-extend the 23-bit offset, mask `~3` for `BLX`. No CFG, no symbols, no heuristics — about a second over a 1.5 MB image, and complete.
+Decode **every** Thumb `BL`/`BLX` halfword-pair in the whole image, sign-extend the 23-bit offset, mask `~3` for `BLX`. No CFG, no symbols, no heuristics — about a second over a 1.5 MB image, and **complete for direct calls**. Whether your image contains any direct cross-module calls *at all* is the first thing to establish, not something to assume. **(A)**
 
 **⚠ On Thumb-1, `bl` is not always a call.** The compiler emits `bl` as a **long branch** when `b.n`'s ±2 KB range cannot reach the target — typically to an outlined `else` arm. So:
 
@@ -60,6 +61,46 @@ Decode **every** Thumb `BL`/`BLX` halfword-pair in the whole image, sign-extend 
 * and, far more dangerously, a reachability analysis that treats `bl` as a call it need not follow will mark **live code dead**. See [patching.md](patching.md) §5.
 
 Tell the two apart by disassembling the target's first instructions: a real function starts with `push {…, lr}` and sets up its own `sl`; a long-branch target does neither and often reads the caller's frame.
+
+### The false-NEGATIVE direction is the expensive one
+
+> **REFUTED.** *"A whole-image `BL`/`BLX` decode answers 'who calls X?' completely. The only caveat is the false-positive direction, where a `bl` is really a long branch."*
+>
+> **Refuted by:** an image in which **every** cross-module call is indirect — `ldr rN, =target|1` followed by a `bl` into a shared, one-instruction `bx rN` veneer. A BL scan over that image reports **zero** callers for every real function, and thousands of callers for the veneer. In the reference port two independent investigations read the **same** `bl` as two different callees — "a call to `free`" and "a call to the save deserialiser" — and no amount of further reading separated them. Computing that instruction's literal-pool address and reading the word settled it in one line; a search for the resulting word then found exactly **two** sites in the entire image that reference that function, which is why a BL graph had never shown its callers. `HIGH / CONFIRMED`.
+>
+> **Why the wrong reading was attractive:** the scan really is complete *as a decode*. Every `BL` in the image is found and every offset is correct. The unstated assumption is that a call's target is encoded **in the call**. On an indirect image it is encoded in a literal pool several instructions earlier, and the branch itself is honest about nothing.
+>
+> **Consequence if carried forward:** "nothing calls this function" is one of the most load-bearing negative results in this work — it is what licenses treating a routine as dead, as un-hooked, or as safe to drive. On an indirect image that negative result is manufactured by the tool, and it is *always* wrong.
+
+### Detect it once per image, then stop wondering **(A)**
+
+Two cheap tells; either is sufficient.
+
+1. **A leaf with an absurd call count.** Rank every callee by BL count. If one or two tiny targets absorb thousands of sites and each disassembles to a single `bx rN` (plus at most a `push`/`pop` pair), the image routes calls indirectly.
+2. **A function you *know* runs has no callers.** Pick a routine you reached from a string binding (§9) — something the game demonstrably executes — and ask who calls it. An empty answer for live code is the tell.
+
+Write the answer into your findings document next to the address model. It decides which query you run for the rest of the port.
+
+### Resolving a call on an indirect image **(A)**
+
+The callee is the word loaded by the nearby `ldr rN, [pc, #imm8]`. Compute the pool slot from the **loading** instruction, never from the branch:
+
+```
+pool_addr = ((addr_of_ldr + 4) & ~3) + imm8 * 4     # Thumb pc = insn + 4, then word-aligned
+callee    = word_at(pool_addr) & ~1                 # the stored word carries the Thumb bit
+```
+
+and the caller query inverts into a **literal search**, which this toolkit already has:
+
+```bash
+xref.py -t target.toml literal 0x0004ce65    # who loads this biased function word (callee|1)
+xref.py -t target.toml fnptr   0x0004ce64    # …in all six encodings, if you are unsure of the bias (§7)
+```
+
+Two consequences worth saying out loud:
+
+* **Arithmetic is the arbiter, not judgement.** When two readings of the same instruction disagree, do not weigh the readings — compute the pointer. "Two people read the disassembly and agreed" is **one** derivation, not two ([evidence-standard.md](../../../shared/evidence-standard.md) §3).
+* **An indirect image is, in one respect, easier.** The callee becomes a searchable *datum* rather than a relative offset, so "who calls X" and "who stores X in a table" are the same query — and on an absolute-addressing build the same trick answers "who touches this global" (§8).
 
 ---
 
@@ -110,6 +151,26 @@ ldr  rX, [pc, #…]                    with a literal pool word == target
 
 Also present in real images and worth adding for your title: `adds rX, #imm8` accumulating in two steps, `add rX, sp, #imm` for stack-relative structures, and offsets folded into `ldr rD, [rB, #imm5*4]` when small enough to be an addressing-mode immediate — the last of which is invisible to a constant scan entirely, so **a null result never proves a field is unread**.
 
+### The third enumeration: block copies name no offset at all **(A)**
+
+Two idiom scans are still not a complete answer, because **a field is also read and written by code that never mentions its offset**:
+
+* a `memcpy`-shaped call that copies a whole record;
+* an `ldm`/`stm` run that copies a block of fields in one go;
+* a struct assignment the compiler turned into either of those.
+
+In the reference port a store-site enumeration built on `strh` missed a site that wrote the two fields it was tracking through an `ldm`/`stm` block copy. Several sessions later, the numbers one screen displayed turned out to come from **two whole-record copies** — a 20-byte block copy into a candidate array, and a full-record `memcpy` into an equipped-slot array — both of which place the fields at the **same relative offsets under a different base**. Neither an offset scan nor a store scan can see either one, and a cache fix built on the assumption that they did not exist was structurally void. `HIGH / CONFIRMED`.
+
+So the complete enumeration is three questions, not two:
+
+| question | query |
+|---|---|
+| who names the offset? | `xref.py offset <imm>`, both Thumb idioms |
+| who copies the whole record? | find the record stride as an immediate (`movs`/`lsls`, an `alloc(N)`, a `memcpy` length) and disassemble its uses |
+| who holds a **second copy** of the record? | search for the same *relative* offsets under a **different base** — that is the signature of a snapshot array |
+
+Finding every copy of a field is a procedure in its own right: [live-data-structures.md](live-data-structures.md) §7.
+
 Practical use: after a differential-RAM diff hands you a candidate offset ([probe-cli.md](probe-cli.md) §8.4), this tool tells you whether any code actually names it, and gives you the readers and writers to inspect.
 
 ---
@@ -131,6 +192,17 @@ xref.py -t target.toml slot 0x138            # who computes or loads sl + 0x138
 ```
 
 * **`slot`** searches literal-pool words equal to an **sl offset**, not an address. Static accesses go through `sl`, so this is the "who touches this global" query.
+
+### ⚠ An immediate scan for a *value* proves nothing either
+
+The caveat in §5 belongs here too, and its absence cost a real session. Three separate image-wide searches for "a `movs rX, #0x81` feeding a `strb`" returned **zero** sites, and that null result was used as grounds to doubt an anchor that was in fact correct. The compiler had *synthesised* the constant:
+
+```
+movs r2, #0x7f
+rsbs r2, r2, #0      ; r2 = -0x7f, i.e. the byte 0x81
+```
+
+**(A) Enumerate the synthesis idioms, or state the blind spot next to the null result.** Constants are routinely built rather than loaded: by negation (`rsbs`), by a shift pair (`movs` + `lsls`), by an add pair, by masking a larger literal, and — for divisors — by a reciprocal multiply with no immediate present anywhere (§11). A value scan is a way to *find* sites; it is never a way to prove there are none.
 
 ---
 
@@ -169,6 +241,24 @@ Per-word classification of an RWPI static region:
 Output shape: `addr (sl+0x…): value  -> …`.
 
 **The fastest way to understand an unknown static region**, and the cross-check for `SL_FO` — a correct base yields a dense run of resolvable words; a wrong one yields noise. It is also how you find the god-object slot (§[address-model.md](address-model.md) §6) and how you find the slots holding the game's own record-name strings, which is step 2 of Recipe A.
+
+### The other address model: `.data` is a section, and it is in the file **(A)**
+
+Everything above assumes an RWPI image whose statics are reached through `sl`. A second, equally common shape is a **fully linked ELF with live section headers** ([address-model.md](address-model.md) §9). There is no `sl` and no static-slot table at all: statics are addressed by **absolute literals**. Two consequences, both large.
+
+**1. Read the section headers; do not hardcode one mapping.** Each section carries its own `(sh_offset, sh_addr, sh_size)`. A tool that linearly maps `.text` — file offset X to vaddr Y, running to EOF — is **structurally blind to `.data`**, and answers "nothing here" to every query about it. In the reference port that blindness lasted many sessions; the moment `.data`'s own pair was read out of the section table, a 20-way overlay dispatch table indexed by a record byte could be dumped **statically**, and its entry 17 identified as the screen a live bug was about. Earlier sessions had only ever observed that table at runtime. The same region on that build also held 16-byte platform import stubs, so dumping it enumerated every platform API the guest uses. `HIGH / CONFIRMED`.
+
+**2. "Who touches this field?" collapses into a literal search.** Because a static's address is embedded verbatim in a literal pool, the hard question (unknown code addresses) becomes the easy one (known data addresses):
+
+```
+every 4-byte-aligned word whose value falls in [field, field + size)
+   -> the ldr rX,[pc,#imm] instructions that load it, resolved as ((pc & ~3) + 4 + imm*4)
+   -> the functions containing them
+```
+
+That query shape — plus an `imm8` scan for known layout constants — was the entry point for most of the remaining work on the reference port's second build. It also answers the negative direction honestly: a range query that returns only readers *inside* a block you already patch is real evidence that nothing else reads it.
+
+**⚠ A null xref against a `.data` address proves nothing if your tool maps only `.text`.** Check which sections your tool knows about before believing any negative result about data.
 
 ---
 
@@ -249,6 +339,24 @@ TARGETS = {
 ```
 
 **The pattern is worth keeping; the contents never are.** **(C)** Those dicts are a session's scratch memory. Do not commit them into shared tooling, do not let them become defaults, and do not copy another port's. Keep them next to the notes for the question they answered, and put anything durable into `target.toml` or into your findings document with its provenance.
+
+---
+
+## 13. Null results: what each query cannot see
+
+Every query in this document is a **finder**. None of them is a prover, and this table is the difference. **(A)**
+
+| query | the null result you will be tempted to believe | what is hiding there | do this instead |
+|---|---|---|---|
+| `calls <addr>` (§2) | "nothing calls it" | every call is `ldr rN,=addr\|1` + `bl` into a `bx rN` veneer | literal-search the biased word — §2 |
+| `offset <imm>` (§5) | "the field is unread" | the offset is an addressing-mode immediate, or the record is block-copied | stride / `memcpy` scan plus a snapshot-array search — §5 |
+| `literal <value>` (§6) | "that constant appears nowhere" | the constant is synthesised (`rsbs`, a shift pair, a reciprocal multiply) | enumerate the synthesis idioms — §6, §11 |
+| any query about a static (§8) | "no code touches this global" | your tool maps `.text` only and the datum is in `.data` | read the section headers — §8 |
+| `fnptr <addr>` (§7) | "it is in no table" | the table stores a different one of the six encodings | search all six at once — §7 |
+| `dis.py` over a range | "this region is not code" | it is a literal pool or a jump table interleaved with code | `--resilient` — §1 |
+| `deadcode_sweep.py` | "this range is unreachable" | the sweep did not follow `bl`, or the range is merely one your own patch branches over | [patching.md](patching.md) §5 |
+
+**The discipline:** when a query returns nothing, write down *which* blind spot you have excluded before you record the negative. An undefended negative result is worth less than no result at all, because it stops the search.
 
 ---
 

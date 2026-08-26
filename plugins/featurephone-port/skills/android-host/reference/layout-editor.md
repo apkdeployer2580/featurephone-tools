@@ -37,18 +37,40 @@ Tags: **(A)** generic · **(B)** worked example from the reference port, re-deri
 enum CtrlId { Ok, Action(u8), Dir, Menu(u8), Plate(u8), MinimapToggle, QuickSave, ... }
 ```
 
-**(A) Identify a control by its seat in the layout, never by the key it sends.** Two reasons,
-both of which bite immediately:
+**(A) Identify a control by its seat in the layout, never by the key it sends.** Three reasons,
+all of which bite immediately:
 
 - **Some controls have no key code at all.** A quick-slot plate resolves its key at press time
   from whatever the slot currently holds — the worker decides, not the UI
   ([thread-model.md](thread-model.md#3-the-two-enums-and-the-design-rule-behind-them)).
 - **The same key exists in two seats.** A numeric key can appear both as a menu button and on
   a pull-out keypad. Keyed by code, they are the same control, and moving one moves the other.
+- **Two seats can be ALTERNATIVES for one job**, chosen by a player setting — a stick and a
+  d-pad, a large action disc and a compact one. They send the same keys and only one is on screen.
 
 Give each id a **stable short on-disk key** and a `parse()` that round-trips it. The on-disk
 key is a compatibility surface: renaming a variant must not silently drop a player's layout.
 Pin the round-trip in a selftest over every variant.
+
+### Alternatives are a FILTER over one id list, never a second id list
+
+**★ (A)** When a setting swaps one control for another, both ids stay in the same list and the
+same table; visibility is a predicate:
+
+```rust
+fn shown(mode: Mode, id: CtrlId, settings: &Settings) -> bool
+```
+
+Three properties follow, and each is the reason not to maintain two id lists:
+
+- **The hidden alternative keeps its table slot and its disk line**, so flipping the setting back
+  restores the arrangement the player made for *that* control rather than resetting it.
+- **The resolver keeps indexing its fixed-size arrays by position in the full list** (§1, §4), so
+  nothing about priority order or array sizing changes when the setting does.
+- **The editor's hit test must apply the same filter as the renderer.** Otherwise a tap aimed at
+  the visible control selects the hidden one sitting under it, and the player drags something they
+  cannot see. **(B)** the reference port shipped exactly that blind-tap selection and closed it by
+  routing the editor's hit test through the same `shown` predicate — one predicate, two callers.
 
 ### Placement is a fraction and a percent, never pixels
 
@@ -331,6 +353,13 @@ nothing is dragging. Do **not** pick the two lowest pointer ids: Android hands o
 *free* id, so "lowest two" selects the **oldest** contacts, which is typically a thumb resting
 on the bezel.
 
+**Suppress every overlay layer that annotates LIVE input while the editor is open.** Position
+badges for a physical pad ([gamepad-and-pad-hud.md](gamepad-and-pad-hud.md#14-one-trailing-pass-only-where-the-control-was-drawn)),
+pressed-state highlights, held-direction indicators: the editor is about arranging *seats*, and an
+annotation that describes what the control does right now is noise on top of the thing being
+dragged — and it moves under the finger for reasons the player cannot connect to their gesture.
+One gate at the badge pass (`&& editor.is_none()`), not a special case per badge family.
+
 Editor chrome buttons, at minimum: mode switches, `FLIP` (mirror), `RESET`, `CANCEL`, `SAVE`.
 Label them in ASCII — see [glyphs-and-text.md](glyphs-and-text.md); a Korean label on a 5x7
 ASCII font renders as **blank space**, not as tofu, so it looks like a missing button.
@@ -378,6 +407,9 @@ increment-accumulating.**
 | Adding a second finger clears the selection | "miss = deselect" | §10 |
 | A pinch resizes the wrong control | paired the two lowest pointer ids | §10 |
 | A control shrinks slightly every time it is dragged | `pct` re-derived from a pixel rect | §1 |
+| Tapping the visible control in the editor selects a different one | the editor's hit test does not apply the renderer's `shown` filter | §1 |
+| Flipping a control-style setting back loses that control's arrangement | alternatives modelled as two id lists instead of one filtered list | §1 |
+| Badges or press highlights move around while dragging in the editor | live-input annotation not suppressed for the editor | §10 |
 | Making controls bigger makes some of them smaller | player sizing fed into built-in geometry | §2 |
 | The player's layout is gone after the app was killed | saved only on DONE | §9 |
 | Layout resets itself on launch, then appears after a rotation | table seeded after the first layout pass | §9 |
@@ -387,6 +419,9 @@ increment-accumulating.**
 ## 13. Checklist
 
 - [ ] Controls identified by seat, with stable on-disk keys and a round-trip selftest.
+- [ ] Alternative controls are one id list plus a `shown` filter, applied by the renderer **and**
+      by the editor's hit test.
+- [ ] The editor suppresses every live-input annotation layer.
 - [ ] `Place` is fraction + percent-of-built-in; `pct` carried, never re-derived from pixels.
 - [ ] `builtins(win)` takes only the window size; a selftest asserts they are disjoint across a
       spread of sizes and aspects.

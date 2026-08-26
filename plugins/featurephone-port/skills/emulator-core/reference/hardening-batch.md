@@ -1,8 +1,19 @@
 # The hardening batch — port these verbatim
 
-Five fixes that are **defects in the emulator, not in any game**. A new title hits every one of
-them; the only title-specific part is how long it takes. Apply them as a batch, early, before you
-spend a week bisecting a symptom that is already documented here.
+**Ten** defects that are in **the emulator, not in any game**. A new title hits every one of them;
+the only title-specific part is how long it takes. Apply them as a batch, early, before you spend a
+week bisecting a symptom that is already documented here.
+
+Five are worked in full below. The other five are the same kind of defect with the same kind of
+device-measured before/after, and are only elsewhere because another file owns the mechanism in
+depth — they are §7, and they are part of the batch, not related reading. **Two of them appear only
+on a device**, which is a property none of the five below have.
+
+**The axis boundary for this file.** §1–§3 own the **guest allocator**: monotonic block growth,
+bucket-header scanning, and the allocation-failure recursion. **Process footprint and eager
+address-space commit are not here** — those live in the mapper below the allocator and belong to
+[memory-footprint.md](memory-footprint.md). The two are confusable in one direction only: a heap that
+*fails to allocate* is §1; a process that *dies with plenty of guest heap free* is footprint.
 
 ## Contents
 
@@ -12,6 +23,7 @@ spend a week bisecting a symptom that is already documented here.
 4. [`JvmThreadGuard` and the host→guest call API](#4-jvmthreadguard-and-the-hostguest-call-api)
 5. [Timer callback log level](#5-timer-callback-log-level)
 6. [Mitigations that are not fixes](#6-mitigations-that-are-not-fixes)
+7. [Five more of exactly the same character, owned by other files](#7-five-more-of-exactly-the-same-character-owned-by-other-files)
 
 ---
 
@@ -327,3 +339,24 @@ Label these as mitigations in the code, or someone will later read them as solut
   justification of the new bound; see the covering-fill guard in
   [graphics-perf.md](graphics-perf.md) §4 for the shape of a bound that is argued rather than
   tuned.
+
+---
+
+## 7. Five more of exactly the same character, owned by other files
+
+Each row is an **emulator defect a new title hits unconditionally**, with a device-measured
+before/after. Work them in the same pass as §1–§6.
+
+| Symptom the porter or the player reports | The defect | Owner |
+|---|---|---|
+| "It restarts if I switch away and come back." No crash dialog, no tombstone | The memory mapper **commits every page of a range up front**, so creating the guest heap commits and zeroes all of it before the first frame — and the fattest process is the low-memory killer's first pick. **(B)** Lazy commit measured total resident **−47 %**, native heap **−66 %**, with the game touching about 7 MB of a 256 MB heap | [memory-footprint.md](memory-footprint.md) §3–§7 |
+| Input lags without bound; the game keeps running in the player's pocket | The event-queue poll yields only when its queue is **empty**. On a device slower than the guest's timer period, a re-armed overdue timer keeps it non-empty and the poll never returns — so the worker loop's input drain and background-pause check are unreachable. Fix: cap consecutive timer callbacks per poll, then yield; on a device that keeps up the branch never fires, so it is free | [frame-pacing.md](frame-pacing.md) §6–§7 |
+| A frame hitch on **every** sound effect | The resource fetch **re-reads and re-parses the whole archive per call** — **(B)** six full archive copies per effect, ≈3.9 ms on a *desktop* host, spent inside the frame budget on the emulator thread | [audio-core.md](audio-core.md) §9 |
+| Memory grows with every sound played, and the parse cost repeats | The asset is parsed on **every** use, and the handle-minting call's destructor is unimplemented, so each call leaks one parsed copy. This is the release-side stub rule again — [wipi-c-recipes.md](wipi-c-recipes.md) §2 | [audio-core.md](audio-core.md) §8–§9 |
+| "The game speeds up", after visiting several screens | The timer **cancel** primitive is a logging no-op while arming **pushes** a new shot instead of replacing the keyed one, so game speed multiplies by the number of screens visited | [frame-pacing.md](frame-pacing.md) §8–§9 |
+
+**(A) The first two are invisible headless.** One needs the platform's memory manager, the other needs
+a host slower than the guest's own timer period. **A porter who validates only headless ships both**,
+and both present to the player as something else entirely — a crash and a laggy control respectively.
+Put them on the device pass:
+[device-verification.md](../../../shared/device-verification.md).

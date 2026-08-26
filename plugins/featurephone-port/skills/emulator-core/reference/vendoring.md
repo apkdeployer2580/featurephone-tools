@@ -13,6 +13,7 @@ upstream. The vendoring architecture is what makes those changes shippable the s
 6. [Pin the toolchain](#6-pin-the-toolchain)
 7. [What the fork delta looked like, categorised](#7-what-the-fork-delta-looked-like-categorised)
 8. [Working rules inside vendored code](#8-working-rules-inside-vendored-code)
+9. [Before you blame a dependency, check whether you have already forked it](#9-before-you-blame-a-dependency-check-whether-you-have-already-forked-it)
 
 ---
 
@@ -179,10 +180,10 @@ are what any port hits **(A)**.
 | `wie_backend/src/lib.rs` | +81 | `Emulator` host-introspection methods, offscreen-copy hook | A |
 | `wie_backend/src/platform.rs` | +67 | `Network` trait, defaulted to `None` | A |
 | `wie_wipi_c/src/api/net.rs` + KTF method table | +90 | `trace_stub`, table padding, real slot implementations | **B** (method A) |
-| `wie_wipi_c/src/api/database.rs` | +120 | record-size query mode, name-keyed delete, unknown-slot no-ops | **B** (method A) |
+| `wie_wipi_c/src/api/database.rs` | +400 | record-size query mode, name-keyed delete, unknown-slot no-ops — **plus the destructive half**: a deferred create-mode truncate held as a per-handle flag, truncate cancellation on every failure and early-return path, the store's write verdict propagated to the guest instead of discarded, and warn-level logging of create-mode opens and executed truncates | **A** for the destructive half (upstream defect), **B** for the slot values |
 | `wie_wipi_c/src/api/graphics{,/framebuffer}.rs` | +440 | row-band framebuffer access | **A** |
 | `wie_backend/src/canvas.rs` | +318 | span intersection, raw row copy, alpha fast paths | **A** |
-| `wie_wipi_c/src/api/media.rs`, `wie_backend/src/system/audio.rs` | +110 | per-clip volume keyed by clip pointer | B (method A) |
+| `wie_wipi_c/src/api/media.rs`, `wie_backend/src/system/audio.rs`, `wie_backend/src/audio_sink.rs` | +900 | per-clip volume keyed by clip pointer; **and the rest of audio**: a parse cache with handle lifetime management (upstream leaked one file copy per data-upload call), a wall-clock catch-up rebase in the sequencer, one shared volume law plus a capability-probing sink method, parse-time bus classification, and the deferred-stop state machine with a host-owned music channel | **A** — mostly upstream defect, like the allocator rows |
 | `wie_util/src/lib.rs` | +67 | `stats` module (no_std atomics) | A |
 | `wie_core_arm/src/engine/arm32_cpu.rs` | +174 | batch-wide memory adapter, retired-instruction count | **A** (perf) |
 | `wie_core_arm/src/{core,thread_wrapper}.rs`, `wie_backend/src/executor.rs` | +102 | nesting, task-count and native-stack gauges | A (diagnostic) |
@@ -190,6 +191,21 @@ are what any port hits **(A)**.
 | `wie_wipi_c/src/api/kernel.rs` | +3 | timer callback `tracing` level demoted to debug | **A** |
 
 **Zero opcode fixes.** See [diagnostics.md](diagnostics.md) §6.
+
+**Two ways this table has already misled a reader, both worth stating out loud (A).**
+
+- **Audio is not a title-specific afterthought.** An earlier version of this table carried audio as a
+  single +110 line for one clip-volume quirk. The real delta in those files is several times that and
+  is **the same kind of upstream-defect work as the allocator and framebuffer rows above it** — a
+  per-call archive re-read, a leaked parse per handle, a sequencer on a wall clock, two buses with two
+  different volume laws. Budget it accordingly. [audio-core.md](audio-core.md).
+- **This table is the *fork*, not the delta.** The host-side half of some subsystems is bigger and
+  more safety-critical than the vendored half. The clearest case is saving: against ~400 vendored
+  lines in `database.rs` sits a host-side record store **and** a pre-image vault — atomic write,
+  retention, restore-at-boot, export, the write/delete policy gate, and the load observation that
+  feeds it — roughly **2,100 lines** in the reference port, and every one of them is the difference
+  between a player keeping their character and not. That work is the
+  [save-integrity](../../save-integrity/SKILL.md) skill.
 
 ## 8. Working rules inside vendored code
 
@@ -204,3 +220,42 @@ are what any port hits **(A)**.
 - **Never make a containment change fatal.** See the corrupt-header rule in
   [hardening-batch.md](hardening-batch.md) §1 — a hardening change that upgrades a survivable error
   to `FatalError` can make the emulator die *earlier* than the bug it was meant to fix.
+
+---
+
+## 9. Before you blame a dependency, check whether you have already forked it
+
+**(A) A vendored fork is invisible to a normal read of the dependency.** `[patch]` redirects the
+build; it does not redirect a *reader*. Someone debugging a hot path opens the published source, or
+the upstream release notes, and reasons carefully about code their binary does not contain. This is a
+**diagnostic** rule, not a setup rule, and it belongs in the same file as the setup because that is
+where a reader will look for it.
+
+Before suspecting any dependency's hot path:
+
+1. read the workspace root's `[patch]` / `[patch.crates-io]` sections — that is precisely the list of
+   crates whose published source is **not** what you are running;
+2. read the **vendored** source of the function you suspect;
+3. only then form a hypothesis.
+
+**(B)** The reference port lost half a day reading an upstream windowing/surface crate's release and
+came close to hand-reimplementing two per-frame costs — a full-window zeroed allocation on every
+buffer acquisition (~10 MB at phone resolution) and a per-byte channel swizzle (~10 M single-byte
+stores per frame) — **both of which its own fork had already fixed**. Upstream even carried its own
+TODO on the second. `HIGH / CONFIRMED`; the note that recorded it was written as an instruction to the
+next session, which is the right instinct.
+
+**(A) The cheap prevention: put the *why* in the manifest, where a reader of the dependency sees it.**
+One comment per patched crate, naming the symptom that forced the fork:
+
+```toml
+[patch.crates-io]
+# forked: this backend allocated and zeroed a whole window buffer per acquisition and swizzled
+# channels one byte at a time -- ~10 MB of allocation and ~10 M single-byte stores per frame at
+# phone resolution. Base commit in vendor/UPSTREAM.txt -- see 3 above.
+<crate> = { path = "vendor/<crate>" }
+```
+
+Same principle as §8's "comment every divergence with the symptom that caused it", moved one level
+up: the divergence comment helps whoever opens the fork; the manifest comment helps whoever never
+thinks to.

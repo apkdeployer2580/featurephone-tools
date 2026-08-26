@@ -10,6 +10,10 @@ For the shape of server most people build here, the honest sentence is:
 That sentence is not the end of the story. This file explains why the model ends up that way, why
 the claim that it is *unfixable* is **wrong**, and what to build instead.
 
+And authentication is only half the file. The second half is **write authority**: which of your
+replies can reach into a player's live character and replace it, why one of them cannot be gated on
+the server at all, and why an in-process engine is a security control rather than a convenience.
+
 ## Contents
 
 - [★ CORRECTION: "structural, cannot be fixed" is wrong](#-correction-structural-cannot-be-fixed-is-wrong)
@@ -21,6 +25,10 @@ the claim that it is *unfixable* is **wrong**, and what to build instead.
 - [Transcripts and peer addresses](#transcripts-and-peer-addresses)
 - [Never let a live account database live in the source tree](#never-let-a-live-account-database-live-in-the-source-tree)
 - [The server can crash any player at will](#the-server-can-crash-any-player-at-will)
+- [★ And it can replace a player's character](#-and-it-can-replace-a-players-character)
+- [★ The dual-use opcode: a distinction that does not exist on the wire](#-the-dual-use-opcode-a-distinction-that-does-not-exist-on-the-wire)
+- [Your backup table is a single mutable cell](#your-backup-table-is-a-single-mutable-cell)
+- [Retiring the wire is a security control](#retiring-the-wire-is-a-security-control)
 - [Denial of service](#denial-of-service)
 - [Pin distribution and rotation](#pin-distribution-and-rotation)
 - [The account code is a recovery phrase](#the-account-code-is-a-recovery-phrase)
@@ -239,10 +247,112 @@ the server can crash or corrupt any player at will**. Consequences to write down
 
 * A **compromised server is a remote-code-corruption vector against every player**, not merely a
   data-loss event.
+* And crashing is the *mild* case. See the next section: a reply can also **replace** a character.
 * The **reply-table catch-all** hijacks every connected user's replies. Off by default; consider
   removing the catch-all from the production code path entirely and keeping it in a development
   build only.
 * Anyone you give shell access to has this capability. Say so before you add a co-admin.
+
+## ★ And it can replace a player's character
+
+**(A) Audit your reply set for authoritative state pushes.** Separately from the crash primitives,
+list every reply the client **applies directly to live game state and then persists**. The test is
+mechanical: read the handler and ask whether it writes into the in-memory player structure, and
+whether anything afterwards serialises that structure back to storage. Any reply that does both is a
+**remote overwrite of the player's saved character**.
+
+These are strictly worse than the crash primitives. A crash costs a session; a character reset costs
+everything the player has ever done, and there is no undo anywhere in the system unless you built
+one.
+
+**(B)** In the reference port this is a save-restore reply. The client deserialises the blob straight
+into the live character structure and re-serialises the slot, **with no occupancy check of any kind**
+— the handler simply does not ask whether that slot already holds a character. The report reads
+*"story, equipment and items all reset"*, and production logs show the server doing it to live
+players. Confidence `HIGH / CONFIRMED` (server log plus the client's restore-handler disassembly).
+
+Write this into the threat model explicitly, because "the server can crash any player" does not
+imply it and readers stop at the first sentence.
+
+## ★ The dual-use opcode: a distinction that does not exist on the wire
+
+**(A) Before you design a guard for a destructive request, prove the request has only one sender.**
+Enumerate the send sites for that opcode the way [request-discovery.md](request-discovery.md) does —
+every `flush` site is one request — and check whether an ordinary, non-destructive part of the
+session emits the *same bytes*.
+
+**(B)** In the reference port it does not have one sender. A routine **login sub-request** and the
+**user-initiated restore** are the same seven bytes, arriving on the same connection, annotated in
+the production log once as each. Nothing distinguishes them: not the opcode, not the length, not the
+payload.
+
+**The consequence is the important part: no server-side guard can be correct.** Every guard shape the
+chapter otherwise recommends fails here —
+
+| guard | why it fails |
+|---|---|
+| a feature flag, defaulted off ([deploy.md](deploy.md) rule zero) | correct hygiene, and it disables the login path too, or neither |
+| a state-derived condition ([deploy.md](deploy.md) rule 3) | the state that separates the two senders is on the **client's** side of the wire |
+| an occupancy check on the server | the server does not know whether the *device's* slot is occupied; its own record is a copy of unknown age |
+
+**(A) So the guard belongs in the host, in the outgoing send path**, where the port owns both ends:
+when the host's own record store says the slot named by the frame is occupied, **substitute** a
+benign sibling request from the same fork — **never drop it**, because dropping leaves the client
+waiting on a reply forever. Mechanics: [refusals-and-holds.md](refusals-and-holds.md) §11.
+
+**(A) Design rules for that guard, and they are the opposite of the usual availability instinct:**
+
+* Ask **exactly one** question about **exactly the slot the frame names**, on the caller's thread —
+  it runs inside a guest `send`, so it must be one filesystem question, not a scan.
+* Answer **conservatively**: anything unreadable, missing or out of range counts as **occupied**.
+* The asymmetry is the whole design. A false *"occupied"* costs one recovery that does not run. A
+  false *"empty"* costs a character.
+
+Full treatment of the loss mechanism, the host-side pre-image vault that **replaces** the protocol
+feature, and the reasons to retire that feature outright:
+`${CLAUDE_PLUGIN_ROOT}/skills/save-integrity/reference/loss-mechanisms.md` §8 and
+`${CLAUDE_PLUGIN_ROOT}/skills/save-integrity/reference/save-vault.md`.
+
+## Your backup table is a single mutable cell
+
+**(A)** If your schema stores one blob per `(account, slot)` — the natural shape, and the one in
+[server-architecture.md](server-architecture.md) — then it **has no history**, and a single upload of
+a damaged character destroys the last good copy. This matters more than it sounds: the server-side
+backup is the thing players are told to rely on, so the mitigation for a data-loss bug is itself a
+single cell that the data-loss bug overwrites.
+
+Fix, and it is small:
+
+* an **append-only history table** with a per-`(account, slot)` cap;
+* a **promote-by-timestamp** operation, so the game's own recovery can return a chosen older blob;
+* **identical replays create no row** — clients of this era commonly re-upload the same blob on every
+  page turn, and without this the history fills with one repeated generation and evicts the ones you
+  wanted.
+
+Three assertions pin it: an identical replay adds no row · promoting a timestamp you do not hold is
+refused · promotion is slot-scoped.
+
+⚠ A server-side history is still not a backup of the *device*. It holds whatever fragment the
+protocol uploads, which in the reference port was equipment only. The device-side pre-image vault is
+the actual backup; see the save-integrity link above.
+
+## Retiring the wire is a security control
+
+**(A)** If your replacement server can push authoritative character state, then an in-app **offline
+mode is a save-safety feature, not a convenience** — and it is a defensible default. An engine
+running beside the save files can consult occupancy directly, and can simply **never send a
+character**: nothing goes on the wire, no remote party has write authority over the player's save,
+and there is no socket for the platform to destroy mid-transaction.
+
+**(B)** The reference port made local mode the default **the same day** it established that the
+server had been overwriting live characters, and its engine answers the recovery request with a
+refusal **unconditionally — even when a backup exists**. The cost is documented in the same place as
+the setting: a player with items on the real server cannot see them until they switch modes. They are
+not lost; they are elsewhere.
+
+This is usually filed as a feature request and built as a convenience. It is the cheapest available
+mitigation for the entire class of *"the server replaced my character"*.
+→ [in-process-engine.md](in-process-engine.md).
 
 ## Denial of service
 
@@ -290,6 +400,10 @@ Copy this into the repository and tick it before the first public link.
 - [ ] Auth model stated in **one sentence at the top of the README**, with the exploit script next
       to it.
 - [ ] Cheat surface listed explicitly (which operations the server approves without checking).
+- [ ] **Data-authority statement**: every reply that can modify a player's saved character is listed,
+      with what stops each one — and each such request has been checked for a **second sender**.
+- [ ] No destructive protocol operation is gated **only** server-side.
+- [ ] The backup store has bounded history and a promote operation; identical replays add no row.
 - [ ] **Deploy docs and code defaults agree on every destructive flag.**
 - [ ] TLS required for any non-loopback address; cleartext fails loudly rather than silently.
 - [ ] Rate limiting exists **in front of** the TLS handshake, not only after it.

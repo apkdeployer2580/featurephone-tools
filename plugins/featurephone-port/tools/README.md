@@ -1,6 +1,6 @@
 # `featurephone-port` tools
 
-Twenty-three command-line tools. Every one is a standalone Python 3.10+ script with no import of
+Twenty-four command-line tools. Every one is a standalone Python 3.10+ script with no import of
 any other tool except `target.py`, so a single file can be copied into a port's own repo if you
 outgrow the plugin.
 
@@ -62,7 +62,8 @@ out to a package manager.
 
 **`--selftest`** runs a tool's built-in arithmetic/decoder round-trip checks and exits. Present on
 `dis.py`, `xref.py`, `thumb_enc.py`, `solve_reloc.py`, `strings_dump.py`, `msgid_scan.py`,
-`deadcode_sweep.py`. Run it once after any local edit to a tool; it needs no target and no binary.
+`deadcode_sweep.py`, `gen_gamefont.py`. Run it once after any local edit to a tool; it
+needs no target and no binary.
 
 **Addresses are FILE OFFSETS by default.** Write `g:0x1234ab` to pass a guest address instead. The
 tools print file offsets because that is what you paste back into the next tool and into a hex
@@ -73,7 +74,7 @@ editor. See [Address vocabulary](#address-vocabulary).
 | package | needed by | install |
 |---|---|---|
 | `capstone` | `dis.py`, `extract_packets.py` | `pip install capstone` |
-| `Pillow` | `frames_to_png.py`, `gen_glyphs.py` | `pip install Pillow` |
+| `Pillow` | `frames_to_png.py`, `gen_glyphs.py`, `gen_gamefont.py` (`--preview` only) | `pip install Pillow` |
 
 Everything else is Python 3.10+ standard library. `target.py` uses `tomllib`, which is stdlib from
 3.11; on 3.10 install `tomli` or upgrade. `publish_audit.py` shells out to `git` for `--all-refs`
@@ -386,6 +387,48 @@ of the whole run. Geometry and pixel format are parsed from the **dump filename*
 invocation is just the directory — which is the reason the probe should put geometry in the
 filename in the first place. `--require-nonblack` makes it a gate: exits non-zero if every frame
 is black, which is exactly the chapter-4 exit criterion. Deps: `Pillow`.
+
+### `gen_gamefont.py`
+
+```
+gen_gamefont.py [-h] [--list] [--probe] [--emit] [--check]
+                [--preview OUT.PNG] [--member SPEC] [--bank K=V,...]
+                [--table K=V,...] [--index K=V,...] [--out PATH]
+                [--preview-bank NAME] [--preview-from N] [--preview-count N]
+                [--zoom ZOOM] [--json] [--selftest] [-t target.toml]
+                [archive]
+```
+
+Bakes the **target's own bitmap font** out of the archive into a generated Rust source table —
+banks, slice tables, a codepage index and its lookup, with no `use` and no `//!` so a standalone
+`rustc --test` selftest can `include!` it. The host then draws its chrome in the game's typeface
+instead of a hand-rolled ASCII one. Where a title ships a font — the common case in this family —
+that font covers, by construction, every string the game itself can display, which removes the
+missing-glyph failure mode rather than managing it. Use it before `gen_glyphs.py`, which becomes
+the fallback for host-invented words in a script the game's own font does not cover.
+
+**It does not guess the format.** You supply the RE-derived parameters — glyph count, bytes per
+glyph, cell, and the slice offsets taken from the loader's memcpy *source* offsets in **file**
+order — and the tool asserts each one against the archive: a bank that runs past its member fails,
+overlapping slices fail (the signature of slicing in destination-address order instead of file
+order), and an unaccounted tail is reported as a memcpy you have not found yet. `--list`
+enumerates candidate members and, with `-t target.toml`, reports which of them the guest image's
+own strings **name** — a sibling face nothing names is the dead one. `--probe` reports the
+(glyphs × bytes-per-glyph) families that close exactly, for matching against those memcpy sizes.
+
+`--index` derives the codepage-to-index table **from the codec** and refuses a declared `count`
+that the codec contradicts, which is what retires a remembered syllable figure: a legacy national
+codepage's block is far smaller than Unicode's, so shipping the whole set is finite.
+
+`--check` regenerates in memory and byte-compares `--out`, exiting non-zero when stale — wire it
+into the build. That gate is the reason the tool has this shape: the archive is gitignored, so a
+checkout can carry a new table with an old archive, or the reverse, while every tool reports
+success. `--preview` writes a contact sheet of one bank's cells for the eyeball pass; composition
+is deliberately not performed, so a composed script shows component cells — which is exactly what
+catches a mis-sliced bank, because no assertion can. Refuses an absolute or packaged-assets
+`--out`, and prints the licensed-content warning on every emit: a generated source file full of
+the game's font bytes is the archive's content under another extension, so publish the generator
+and your format notes and generate the table at build time. Deps: `Pillow`, for `--preview` only.
 
 ### `gen_glyphs.py`
 

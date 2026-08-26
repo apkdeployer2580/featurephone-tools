@@ -8,10 +8,12 @@ the only one of the six boot failures whose *content* is title-specific — the 
 1. [How a missing method presents](#1-how-a-missing-method-presents)
 2. [`trace_stub` — the highest-value technique in this skill](#2-trace_stub--the-highest-value-technique-in-this-skill)
 3. [Recipe: add a WIPI-C function (KTF)](#3-recipe-add-a-wipi-c-function-ktf)
+   - [3a. Range-dispatch a whole block when the runtime crate names only a few slots](#3a-range-dispatch-a-whole-block-when-the-runtime-crate-names-only-a-few-slots)
 4. [Table padding, or the guest branches to address 0](#4-table-padding-or-the-guest-branches-to-address-0)
 5. [Argument mapping and the `MethodBody`-not-closure constraint](#5-argument-mapping-and-the-methodbody-not-closure-constraint)
 6. [Worked example: the network table](#6-worked-example-the-network-table)
 7. [Worked example: the record database](#7-worked-example-the-record-database)
+   - [7a. The same interface can destroy saves, and that outranks every read-path bug](#7a-the-same-interface-can-destroy-saves-and-that-outranks-every-read-path-bug)
 8. [Worked example: audio clip volume, and "the handle changes under you"](#8-worked-example-audio-clip-volume-and-the-handle-changes-under-you)
 9. [Return-value honesty](#9-return-value-honesty)
 
@@ -27,13 +29,20 @@ So the presentation is: **frozen or black screen, plus exactly one log line nami
 the slot.** Nothing else. That single line is the entire porting workflow for this stage — grep for
 `Unimplemented` and you have your next task.
 
-Two failure shapes that look similar but are not:
+Three failure shapes that look similar but are not:
 
 - **Unknown interface at boot.** The loader's `get_interface(name)` knows a small fixed set of
   names and returns **0 with a warning** for anything else. The guest then dereferences a null
   pointer and dies far from the cause. Grep the boot log for that warning before anything else.
 - **Unknown SVC category.** `Unknown SVC handler category: N` — the guest issued a supervisor call
   in a category no handler claims. Different layer, different fix.
+- **A whole functional block that is fatal by construction.** This shape appears the moment you boot
+  a **second carrier's** runtime crate. That crate may name only a handful of slots in an entire
+  functional block and route every other id through a `TryFrom<u16>` whose `_ =>` arm returns
+  `FatalError`. There is then **no `Unimplemented` line, no null branch and nowhere to hang a trace
+  stub** — the emulator exits at the first call into that subsystem, i.e. the instant the game opens
+  a socket. The report you receive is *"the network doesn't work on the new build"*; what happened is
+  that the emulator stopped. Fix: [§3a](#3a-range-dispatch-a-whole-block-when-the-runtime-crate-names-only-a-few-slots).
 
 ## 2. `trace_stub` — the highest-value technique in this skill
 
@@ -89,6 +98,38 @@ fn peek(context: &mut dyn WIPICContext, v: WIPICWord) -> String {
 you know the *semantics*, not just the sequence. Keep the trace stub in place for the slots you
 still do not understand; a running game producing a log is worth more than a correct
 implementation of one slot.
+
+### The rule inverts for release-side calls
+
+**(A)** `trace_stub` is right for **query** and **set-side** calls, where *some* return value keeps
+the guest walking. It is dangerous for **release-side** calls — cancel, free, close, stop, unset —
+because there is no plausible return value to choose: the thing that matters is the **omitted side
+effect**. A no-op release paired with an implemented acquire **accumulates**, and the symptom then
+appears nowhere near the stub.
+
+> **REFUTED.** *Previously documented (this file §2 and §7, and the router's discovery loop):* "Do
+> not implement the missing method first. Replace the fatal stub with a logging no-op that returns a
+> chosen plausible value" — stated without exception, with the one release-side instance in this file
+> ("name-keyed record delete was a no-op upstream") filed as a quirk of that interface rather than as
+> the rule it is. **Refuted by** a shipped speed bug: the platform's timer-**cancel** call was a
+> logging no-op while the timer-**set** call *pushed* a new event instead of replacing the keyed one,
+> so every visit to a screen that arms its own timer left a live timer behind and the guest's frame
+> callback ran once per live timer. The player's report was *"the game speeds up after connecting to
+> the network"*, and it was first misattributed to an unrelated clamp change. **Why the wrong reading
+> was attractive:** a no-op looks *neutral* — it returns success, nothing faults, and the call appears
+> in the trace — so it reads as "handled" in exactly the log you are using to decide what is handled.
+> **Consequence if carried forward:** an unbounded leak whose symptom (game speed, memory, socket
+> count, audio slots) has no textual link to the stub, and which grows with the player's **route
+> through the game** rather than with time — so it does not reproduce on your test path.
+
+**(A) The audit, and its verification.** For every `set` / `alloc` / `open` / `start` you implement,
+find its `unset` / `free` / `close` / `stop` in the same table and implement it in the same sitting.
+Where you cannot, record it as a **known leak with a named symptom**, never as a neutral placeholder.
+The verification is a **round trip**: enter the screen that acquires, leave it, come back, and confirm
+the resource count — timers firing per second, live handles, open sockets, live clips — is identical
+to before. Doing that once per subsystem is cheaper than one misattributed speed bug. The specific
+timer case, including why arming must *replace* a keyed shot rather than push one, is
+[frame-pacing.md](frame-pacing.md) §8–§9.
 
 ## 3. Recipe: add a WIPI-C function (KTF)
 
@@ -157,6 +198,33 @@ pub async fn fill_rect(
 Return `Result<i32>` / `Result<u32>` / `Result<()>`; `.into_body()` (the `MethodImpl` trait) does
 the wrapping.
 
+### 3a. Range-dispatch a whole block when the runtime crate names only a few slots
+
+**(A)** When a second carrier's runtime names three slots out of a block of thirty-odd and sends every
+other id to a fatal `_ =>` arm (§1, third shape), **the bodies are not what is missing.** The WIPI-C
+bodies live in the shared crate and are carrier-agnostic; what is missing is a **slot-number
+mapping**. Three rules:
+
+1. **Dispatch the block by range *before* the id→enum conversion.** Any id that reaches `try_from` is
+   fatal by construction, so a `match` arm added *after* it can never run — the fix looks applied and
+   changes nothing. The shape is
+   `if (BASE..BASE + SLOTS).contains(&id) { return block_body(id - BASE); }`, placed above the
+   conversion.
+2. **Reuse the other carrier's table at the same positional index.** Position is the ABI (§3), and
+   both runtimes front the same shared bodies.
+3. **Prove the base; do not assume it.** Take the slots the crate *does* name, subtract the base you
+   propose, and check each lands on the semantically matching call in the other carrier's table. Two
+   adjacent agreements prove nothing — you need a **non-adjacent** third point to rule out an
+   accidental fit.
+
+**(B)** In the reference port the second carrier named three network slots. They resolved to
+`base + 0`, `base + 1` and `base + 6`, and index 6 in the first carrier's table was exactly the
+matching call — the non-adjacent point — so `NET_SVC_BASE = 0x258` with 34 slots was not a fit to two
+data points. `HIGH / CONFIRMED`: before the change the emulator exited the instant the game opened a
+socket; after it, the device log carries the entire connect sequence. Carrier-to-carrier work in
+general is [multi-build.md](../../guest-re/reference/multi-build.md); which loader each carrier uses
+is [platform-matrix.md](../../port-triage/reference/platform-matrix.md).
+
 ## 4. Table padding, or the guest branches to address 0
 
 **This is the trap that produces the least legible failure in the whole skill.**
@@ -214,6 +282,25 @@ Slots eventually implemented: **2** (socket), **13** (set read callback), **30**
   1, not upstream's slot 6. *Trace the real contract; do not read the names and assume.*
 - **The table had to be padded** (§4). Upstream shipped 30 entries; the guest indexed slot 30.
 
+**Both findings are stronger per carrier than they look here.** The *same game* on a second carrier
+runtime used a **different slot in the same block for the same operation** — one build connects
+through the block's named-connect slot, the other through slot 3 with a different argument shape —
+and it also called two slots in an entirely different id group. The rule that follows is blunt:
+**a per-carrier port re-traces the whole call sequence for every subsystem it touches.** None of the
+sequence is a property of the game.
+
+**(A) The cheapest way to enumerate the platform surface is the guest's own import table, not a
+device log.** On a linked, section-mapped image the platform imports are a table of fixed-size call
+stubs in a data section; dumping it lists **every** platform slot the guest can reach — statically,
+with no device round trip and no need to reach the game state that exercises it. **(B)** In the
+reference port each stub was 16 bytes
+(`str lr,[sp,#-4]!` / `bl <resolver>` / `.word <table>` / `.word <index>`), the dump gave all 64
+imports at once, and two unknown ids in a 900-range group decoded to `htons` and `inet_addr`. It was
+cross-checked, not guessed: one entry decoded to an id the device log had already shown being used to
+connect. `HIGH / CONFIRMED`. Your static tools can only see that section if they read the section
+headers instead of hardcoding one section's file-offset-to-vaddr mapping —
+[static-toolkit.md](../../guest-re/reference/static-toolkit.md).
+
 Server-side work — framing, request discovery, replies — belongs to the `server-revival` skill.
 This skill owns only the socket surface.
 
@@ -239,7 +326,46 @@ Two more from the same interface, both **(A)** as method:
   same claim as *"the contract is 0"*. Anyone who later sees odd behaviour needs to know which one
   you meant.
 - **Name-keyed record delete was a no-op upstream**, so "reset save" left the old record in place
-  and the supposedly-empty slot reloaded it on the next boot. Check delete, not just read/write.
+  and the supposedly-empty slot reloaded it on the next boot. Check delete, not just read/write. This
+  is one instance of the release-side rule in §2, not a quirk of this interface.
+
+### 7a. The same interface can destroy saves, and that outranks every read-path bug
+
+Everything above **hides** a save. The three defects below **delete** one, they were all in the same
+upstream file as the size-query bug, and on a real port they are what you fix first.
+
+1. **Create-mode open must not truncate up front.** Upstream deleted the record the moment the guest
+   opened the database in create mode — so the character did not exist on disk for the entire width of
+   the guest's `open` → `write` → `close` sequence, a window that a kill, a crash or a background
+   death lands inside. **Defer the truncate to the first successful write**, carried as a per-handle
+   flag, and execute it at `close` only if no write ever landed.
+2. **Every failure path must disarm the pending truncate.** With the flag cleared only on success, and
+   a guest writer that closes unconditionally without reading the return value, **every failed write
+   became a delete.** Each early return in the write function has to cancel it explicitly; "the
+   function returns an error" is not enough, because nobody reads the error.
+3. **Propagate the store's verdict.** Upstream discarded the store's success flag, so a failed save
+   was reported to the guest as a success — the one state in which the player is guaranteed not to
+   retry.
+
+Add two rules alongside (1): a create-mode open must not truncate a database **seeded from a packaged
+read-only archive member**; and every create-mode open and every executed truncate is logged at
+**warn** with the mode in the line, because these are precisely the events you will want *dated* when
+a report arrives weeks later.
+
+**And the framing at the top of §7 is wrong in one important way (A).** A guest can only report
+"empty" for a record that is **missing, zero-length, or checksum-failed** — a slot-summary builder has
+no way to express *failure*. So **"reads as empty" is a deletion report, not a read-path report**,
+unless the slot was empty on the very first boot. Split the symptom:
+
+| What the player says | Class | Where |
+|---|---|---|
+| Every slot reads as empty from boot 1, for a save that never existed | read path — the size-query mode above | §7 |
+| A slot that **used to work** now reads as empty | **deletion** — a create-mode truncate, a truncate left armed by a failed write, or a non-atomic replacement | [save-integrity](../../save-integrity/SKILL.md) |
+
+The host-side record store, the pre-image vault, the write/delete policy gate and the load-observation
+diagnostics are the [save-integrity](../../save-integrity/SKILL.md) skill's subject. This file owns
+only the WIPI-C surface they sit under — and that surface is where three of the four irreversible
+mechanisms live, so do not treat it as merely an API-completeness chore.
 
 ## 8. Worked example: audio clip volume, and "the handle changes under you"
 
@@ -255,6 +381,27 @@ and play. A handle-keyed cache therefore keys on a handle that no longer identif
 handle inside `play`. Whenever you cache state across two WIPI calls, ask *which identifier in this
 pair is stable across the calls between them* — the answer is frequently not the handle the API
 hands you.
+
+**That fix makes the control *do* something; it does not make it correct.** Three further things
+decide whether one chosen level means the same thing on both sound buses, and all three are
+core-side:
+
+1. **One volume law, defined once and shared by every bus**, applied as an **output gain** and
+   **curved** (square a normalised level) — a linear map spends nearly its whole perceptual range in
+   the top step.
+2. **Never apply the level inside the synthesis domain.** Scaling note velocity on a sequenced bus
+   runs the level through the instrument bank's concave velocity-to-attenuation modulator (roughly
+   double the dB drop) and additionally selects sample layers and moves filter cutoff — so lower
+   settings become *duller* as well as quieter, on a curve unrelated to the PCM bus.
+3. **Let the sink declare which layer applied the level** — a defaulted trait method returning
+   `bool` — so a sink that hands events to an external synth keeps its old path and nothing applies
+   the level twice.
+
+**(B)** The reference port's first shipped volume fix did exactly the wrong thing here (linear on the
+PCM bus, velocity on the sequenced one) and the two buses measured **27–39 dB apart at one setting**.
+The law, the prohibition and the capability probe are [audio-core.md](audio-core.md) §4–§6; the
+player-facing level UI and the mixing above it are
+[audio-mixing.md](../../android-host/reference/audio-mixing.md).
 
 ## 9. Return-value honesty
 

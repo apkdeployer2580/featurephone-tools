@@ -67,6 +67,8 @@ Device-side pacing is a different problem with a different answer (adaptive mult
 | `--profile 1` | false | sampled guest-PC profile (§8.3) |
 | `--char-dump <dir>` | none | dump the god object and the whole static area at dump frames (§8.4) |
 | `--trace-state 1` | false | print map signature / window state / last offscreen blit |
+| `--hle 0\|1` | 1 | master switch for **host reimplementations of guest routines** (trap hooks). One binary runs both ways, which is what makes the A/B identity proof possible (§8.5) |
+| `--poke f:addr:hex` | empty | write bytes into guest memory at frame `f`, **logging the bytes it displaced**. The workbench for validating a patch candidate before it goes anywhere near the app (§8.6) |
 
 **Key names to accept:** `UP DOWN LEFT RIGHT OK LSK RSK CLEAR|CLR NUM0..NUM9|0..9 HASH|# STAR|*`. Accept both the long and short spellings; you will type these hundreds of times.
 
@@ -225,6 +227,37 @@ Dump both, always. A "current map id" is far more likely to be a global than a f
 6. Confirm with `xref.py offset <imm>`: some code site must materialise that offset. If nothing does, you found a field the code reaches by pointer arithmetic and you need a different anchor.
 7. Satisfy Rule 2 — the diff is derivation #1; the clamp value, the game-rule arithmetic, or the set of semantically consistent readers is derivation #2. See [recipes.md](recipes.md) Recipe D.
 
+### 8.5 `--hle` — the A/B identity protocol for a host reimplementation **(A)**
+
+§8.2 diffs a host renderer against the guest's own buffer *inside* one run. The complementary proof is *between two runs*: the same binary, the same archive, the same deterministic key script, the same virtual clock — differing **only** in one boolean. Any pixel difference is then unambiguously the host reimplementation's fault, because nothing else differed. This is the acceptance test for handing a guest routine to the host ([patching.md](patching.md) §3c).
+
+```bash
+<probe> --zip work/<archive>.zip --w 240 --h 320 --frames 1300 --ms 20 \
+        --keys 260:OK,300:OK,360:OK --dump 200,420,600,800,1000,1200,1300 \
+        --hle 0 --out work/ab/off
+<probe> …same…  --hle 1 --out work/ab/on          # then compare the frame hashes pairwise
+```
+
+Reference results **(B)**: three hosted pixel loops, each proven by byte-identical frame hashes at **every** dumped frame — 6/6, 5/5 and 7/7 — while guest instruction counts fell 34 %, 64 % and 24 %. Across two revisions of the same carrier package the blitter's *call count* was identical (226,008 / 226,008), which is itself evidence that the two revisions run the same game logic.
+
+Three clauses belong with the flag **(A)**:
+
+* **Provide a second isolation mechanism.** Some hooks cannot be switched at runtime; for those, add and remove the patch-table entry and rebuild. Two mechanisms mean you are never unable to run the proof.
+* **⚠ A matching frame hash proves NOTHING unless a fire counter shows the hook actually ran in that run.** The reference port hit exactly this: an A/B ran a title-screen loop in which the new hook never fired, so the "identical" result was vacuous and firing had to be proven afterwards from the device's own counter. Print `calls / hosted / refused / pixels` per hook and require `hosted > 0` before you believe a match.
+* **Count refusals by cause** — format, transform, geometry, unreadable memory, null. A hook that "works" by refusing 98 % of its calls is not a win, and the histogram is the only thing that says so.
+
+The hook contract itself is [guest-pixel-loops.md](../../emulator-core/reference/guest-pixel-loops.md).
+
+### 8.6 `--poke` — validating a patch candidate against RUNNING memory **(A)**
+
+`--poke <frame>:<addr>:<hex>` writes bytes into guest memory at a frame and **logs the bytes it displaced**:
+
+```
+[poke] frame 300  0x0014a324: orig 9b40 -> e1d3 (ok)
+```
+
+The logged original is the whole point. A static read tells you what is in the *file*; this tells you what is in *memory at the moment your patch would fire*, and **"the displaced bytes equal what the static read predicted" is the pass condition** before a site is written into the app ([patching.md](patching.md) §1). Run it alongside a frame-hash comparison against an un-poked run: the hashes must be identical everywhere the patch is not expected to change pixels.
+
 ---
 
 ## 9. Build modes
@@ -277,6 +310,7 @@ Cheap, device-free, and each one catches a whole class of regression:
 | the probe exits 0 over N frames | fatal unimplemented stubs, tick errors |
 | a dumped frame reports `non_black > 0` | the virtual-clock regression, a blank archive, a graphics blanking bug |
 | `--map-check` reports 0 mismatches | a host reimplementation drifting from the guest |
+| an `--hle 0` / `--hle 1` pair gives identical frame hashes **and** a non-zero fire count | a hosted guest routine drifting from the guest — and an A/B that silently proved nothing |
 | `LIVE` is flat across the last 10 k frames | a guest-side allocation leak |
 | a long run (30 k frames) completes | allocator exhaustion after tens of minutes |
 

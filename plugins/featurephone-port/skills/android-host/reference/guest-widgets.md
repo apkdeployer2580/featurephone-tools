@@ -9,15 +9,20 @@ classes of host-to-guest write with the discipline each one needs.
 Tags: **(A)** generic · **(B)** worked example from the reference port, re-derive it ·
 **(C)** do not copy.
 
+**Owned elsewhere:** making the game's *own* menus tappable — cursor bytes, synthesised confirms,
+geometry derived from the frame buffer — is
+[touch-driven-guest-ui.md](touch-driven-guest-ui.md), and §3 and §7 below hand off to it at the two
+points where this file's rules invert.
+
 ## Contents
 
 - [1. The read side](#1-the-read-side)
 - [2. Pointer-hop validation](#2-pointer-hop-validation)
-- [3. Do not screen-scrape. Reimplement.](#3-do-not-screen-scrape-reimplement)
+- [3. Do not screen-scrape. Reimplement. (For DATA widgets.)](#3-do-not-screen-scrape-reimplement-for-data-widgets)
 - [4. Differential verification](#4-differential-verification)
 - [5. The write side: read - compare - write - re-assert](#5-the-write-side-read---compare---write---re-assert)
 - [6. Poke the guest's widget out of the way](#6-poke-the-guests-widget-out-of-the-way)
-- [7. The six classes of host-to-guest write](#7-the-six-classes-of-host-to-guest-write)
+- [7. The eight classes of host-to-guest write](#7-the-eight-classes-of-host-to-guest-write)
 - [8. Six rules for code patches](#8-six-rules-for-code-patches)
 - [9. Host-owned state](#9-host-owned-state)
 - [10. Driving the game's own routines](#10-driving-the-games-own-routines)
@@ -85,7 +90,14 @@ Two more guards that are equally load-bearing:
 Every one of these returns `None`, and `None` means **draw nothing this frame**, never
 "draw the last good value forever" and never "draw zeros".
 
-## 3. Do not screen-scrape. Reimplement.
+## 3. Do not screen-scrape. Reimplement. (For DATA widgets.)
+
+**Scope, added in 0.2.0:** this section is about widgets whose content is *data the game holds* —
+a minimap, gauges, an inventory bar. It is right for those and **wrong for input geometry and for
+transient selection state**, which is the subject of
+[touch-driven-guest-ui.md](touch-driven-guest-ui.md#13-why-geometry-comes-from-pixels-not-memory).
+Read the split at the end of this section before applying the rule to a screen you want to make
+tappable.
 
 The history here is the lesson, and it is worth its full length because the wrong approach is
 the obvious one.
@@ -123,6 +135,32 @@ Practical shape of a reimplementation:
 - **Report** overlays such as a player marker as coordinates for the caller to draw, rather
   than stamping them into the buffer. Stamped decoration makes the pixel diff in §4
   meaningless.
+
+### ★ Where the rule inverts: geometry and selection are pixel-first
+
+The rule above says *"only scrape when the pixels are the only source of truth — and then question
+whether they really are."* **(A) For two categories, the pixels really are the only source, the
+questioning costs builds, and the correct pattern is the inverse of this section's.**
+
+**1. Transient widget selection.** A module-drawn confirm box moves its highlight when the player
+presses a direction — and a whole-record memory watcher sees **zero bytes change anywhere**. The
+selection lives in module-local state the host cannot reach; the two rectangles in the frame *are*
+the state. **(B)** measured in the reference port: ~1,040 pixels moved, not one record byte.
+
+**2. Which layout a shared widget is drawing.** Two screens can share one cursor byte and draw
+completely different grids — **(B)** 8×2 at pitch 19 versus 5×1 at pitch 29, with identical 17 px
+cells — and the byte that looked like a paint flag read `0` on one screen and `12` on the other.
+Memory cannot answer *"is this a row list or an item grid?"* at all. Three consecutive
+memory-based fixes each cost a build and each was reported back as *"the wrong item focuses"*.
+
+**The pattern that works, and it is the inverse of §3's:** derive the geometry **from the frame
+buffer on the UI thread**, then cross-check the pixel-derived index against the live cursor byte
+**on the worker**, and do nothing on a mismatch. Neither half is trusted alone.
+[touch-driven-guest-ui.md](touch-driven-guest-ui.md#14-the-runtime-cross-check) specifies it.
+
+A corollary worth its own line: **the keycaps and prompts the game draws itself are pixel-only
+targets that need no anchor at all** — which is why they work on screens you have never reverse
+engineered. See [touch-driven-guest-ui.md](touch-driven-guest-ui.md#7-stage-1-the-keys-the-game-already-printed).
 
 ## 4. Differential verification
 
@@ -163,9 +201,14 @@ ships only after a zero-mismatch run on two states.
 
 ## 5. The write side: read - compare - write - re-assert
 
-> **★ (A) The universal discipline for every host poke into the guest:**
+> **★ (A) The discipline for every host poke that establishes PERSISTENT guest state:**
 > **read the current bytes -> compare against the documented original -> write only on a
 > mismatch -> re-assert on a slow cadence, forever.**
+
+**The scope word is load-bearing.** 0.1.0 called this "the universal discipline for every host
+poke" and it is not: a **transient UI cursor** write inverts three of the four properties below —
+it is written once, must never be re-asserted, and has no documented original to compare against.
+That is class 7 in §7, and its rules are stated there.
 
 ```rust
 /// Returns the write to perform, or None if the guest already holds the desired value.
@@ -210,23 +253,77 @@ It also removes obstacles from the placement resolver's list
 ([layout-editor.md](layout-editor.md#6-the-three-obstacle-families)), which is a second,
 larger win: fewer obstacles means more legal seats for the player's controls.
 
-## 7. The six classes of host-to-guest write
+## 7. The eight classes of host-to-guest write
 
-**(A)** Every poke the reference port shipped falls into one of six shapes. Knowing the
+**(A)** Every poke the reference port shipped falls into one of eight shapes. Knowing the
 taxonomy tells you what to verify. **(B)** the example sites are that title's; the *method*
-column is yours.
+column is yours. Classes 7 and 8 were added in 0.2.0 — 0.1.0 said "every poke falls into one of
+six shapes" and the two it was missing are the two whose verification rules are *not* §5's.
 
 | # | class | what it is | how you find the site | what can go wrong |
 |---|---|---|---|---|
-| 1 | **data byte force** | write a flag/level byte in the god object | enumerate every writer of the field and prove the set is closed (init, the item that sets it, the new-game reset) and that it is **not serialised** into the save | if it *is* serialised, you have permanently altered the player's save |
+| 1 | **data byte force** | write a flag/level byte in the god object | enumerate every writer of the field and prove the set is closed (init, the item that sets it, the new-game reset) and that it is **not serialised** into the save; **and** establish the legal range, and whether the field is a scalar or an array element (see below) | if it *is* serialised, you have permanently altered the player's save; an out-of-range value opens a state the game cannot reach by itself |
 | 2 | **relocated global write** | write a word in the RWPI static area | find the slot, then prove **all** referencing sites are read-only | a writer elsewhere overwrites you at an unpredictable time |
 | 3 | **runtime record field poke** | change a field of a struct the guest built at load time (e.g. a UI frame's height) | trace the loader that fills the struct; identify the field by its use, not its position | ⚠ adjacent fields lie. In the reference, the field two bytes below the frame height was the **4bpp source row stride** — poking it corrupts the sprite |
 | 4 | **immediate-operand rewrite** | change an `imm8` inside a Thumb ALU instruction | `xref` for every site materialising the constant; **both** Thumb idioms | see rule 2 below - the widget usually has several sites, and the block may exist twice |
 | 5 | **branch-over-a-block** | replace one instruction with a branch past a range | disassemble the range; audit its stores | anything the block maintained is now frozen (see rule 6) |
 | 6 | **arithmetic-instruction rewrite** | re-encode e.g. `adds rD, rN, #0` as `subs rD, rN, #k`, or change a divisor | find the formula, pick a constant you can change **size-neutrally** | flag liveness, and the immediate's bit width bounds the feature |
+| 7 | **transient UI cursor write** | move the game's own menu/grid cursor so a tap lands where the player pointed | the byte the game's own arrow-key arm writes; see [touch-driven-guest-ui.md](touch-driven-guest-ui.md#2-the-translation-their-cursor-byte-their-key) | it has **no** documented original and no stable value; §5's discipline actively breaks it |
+| 8 | **intercepting a guest write to STORAGE** | allow, refuse or redirect the guest's own record write | the record store you ported ([storage-and-config.md](storage-and-config.md#1-the-two-storage-backends)) | the guest usually ignores the failure code, so a refusal is silent to the game *and* to the player |
 
 Classes 4-6 are code patches and are covered by `guest-re`'s patching reference for the
 encoding side. The rules below are the host-side half.
+
+### Class 1, the two obligations 0.1.0 left out
+
+**(A) (a) Clamp your own writes — the guest's clamp may not be where you think.** A range check
+frequently lives *only* inside the key-handler arms, while the commit/OK arm is a bare
+load/increment/store with no bounds check at all. So a host write of an out-of-range value opens a
+state the game cannot reach by itself, and it will not crash to tell you. **(B)** writing `6` into
+a `0..=5` menu cursor and synthesising OK dispatched entry 7 of a 20-way function-pointer table and
+opened a screen unreachable from the menu. Clamp in the pure geometry function **and again at the
+write site** — two clamps, because the first is a UI-thread computation and the second is the last
+thing before the poke.
+
+**(A) (b) When the field is an ARRAY element, clamping is the wrong defence — REJECT.** If the
+index comes from another live byte (a page number, a tab), an out-of-range index does not write an
+illegal value: it writes a perfectly legal value **into a different field of the same record**.
+Clamping the *value* does nothing about that. **(B)** in the reference port the per-page cell-cursor
+array runs into another screen's three-byte cursor immediately past the game's own page count.
+Full statement of the split: [touch-driven-guest-ui.md](touch-driven-guest-ui.md#15-bounding-the-write-clamp-a-scalar-reject-an-index).
+
+### Class 7: a transient cursor inverts §5
+
+**★ (A)** Four rules, each the opposite of the corresponding §5 property:
+
+| §5 says | class 7 needs |
+|---|---|
+| re-assert forever | **write exactly once per tap.** Re-asserting fights the player's own arrow keys and the game's own screen transitions |
+| compare against the documented original | **there is no original** — the legal value changes every frame. What replaces it is a **bounds check** plus a **cross-check against independent evidence** (the pixel-derived index must agree with the live byte) |
+| a cached read is fine at this cadence | **re-read before every decision.** The game clears these bytes on its own transitions, and its key callback stamps one for every key — including the ones you synthesise |
+| idempotent, so cadence does not matter | **the write is an event.** Order matters, and the write and the synthesised confirm are one transaction |
+
+Everything about performing that transaction — the two-tap contract, the gate list, failing closed
+on a bad read — is [touch-driven-guest-ui.md](touch-driven-guest-ui.md).
+
+### Class 8: intercepting the guest's own save
+
+**(A)** Four obligations, none of which resemble classes 1-6, because the thing you are modifying is
+the *player's data* rather than the game's behaviour:
+
+- **A refusal is silent.** The guest typically discards the store's failure code, so the game shows
+  no error and the player learns nothing — until they notice their character stopped being saved.
+- **A refusal diverges state.** Host-owned files that already committed now disagree with the
+  guest's world, and that surfaces as items lost or duplicated rather than as a save error. Prefer
+  **redirect** to refusal wherever you can prove where the write belongs.
+- **A redirect changes the disk landing point ONLY** — never the guest's own index word, which the
+  screen that owns it will keep using.
+- **The whole authority rests on one scalar** (which slot the live character occupies), whose
+  provenance must be an **observed load** and nothing else.
+
+This is `save-integrity`'s subject in full:
+[slot-identity.md](../../save-integrity/reference/slot-identity.md) and
+[policy-and-diagnostics.md](../../save-integrity/reference/policy-and-diagnostics.md).
 
 ## 8. Six rules for code patches
 
@@ -347,6 +444,11 @@ Validation discipline for such a chain, all **(A)**:
 | A timed host effect never expires, or lasts far too long | expiry stored as a tick counter (§9) |
 | A restored binding refers to something the player no longer has | raw guest bytes stored instead of an identity + validity stamp (§9) |
 | A length assertion fires on the first real use | a measured value pinned as an invariant (§10) |
+| A tap focuses the wrong cell in one window and the right one in another | grid geometry taken from memory; two screens share a cursor byte and draw different pitches (§3) |
+| A menu cursor the host writes keeps snapping back, or fights the player's arrow keys | a class-7 transient cursor re-asserted like persistent state (§5, §7) |
+| A host-written cursor opens a screen the menu cannot reach | the guest's clamp lives only in its key arms; the host did not clamp its own write (§7 class 1) |
+| A host-written cursor corrupts an unrelated field | an out-of-range **array index** clamped instead of rejected (§7 class 1) |
+| Saving silently stops for a whole session; items vanish or duplicate | a class-8 storage refusal the guest never reported (§7 class 8) |
 
 ## 12. Checklist
 
@@ -355,7 +457,11 @@ Validation discipline for such a chain, all **(A)**:
 - [ ] Every pointer hop is window-validated; every derived size has a sanity ceiling.
 - [ ] Any host reimplementation of a guest widget lives in a dependency-free module the probe
       `include!`s, and has a **zero-mismatch** differential run on two game states.
-- [ ] Every poke is read-compare-write and re-asserted on a slow cadence.
+- [ ] Every **persistent-state** poke is read-compare-write and re-asserted on a slow cadence; every
+      **transient cursor** poke is written once, re-read before each decision, bounds-checked and
+      cross-checked (§7 classes 1 and 7).
+- [ ] Any interception of the guest's own record writes follows `save-integrity`, and prefers
+      redirect to a silent refusal (§7 class 8).
 - [ ] Every code patch verifies the original bytes, covers the whole widget, checks for an
       outlined twin, is size-neutral, bounds itself by its encoding, and accepts its own prior
       encoding.

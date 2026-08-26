@@ -20,6 +20,9 @@ assertion is one RE claim; when a document and the code disagree, the suite says
 - [The end-to-end TLS test](#the-end-to-end-tls-test)
 - [Exploit-script-as-test](#exploit-script-as-test)
 - [Mechanizing class 2 from a transcript](#mechanizing-class-2-from-a-transcript)
+- [Stream-chunking equivalence](#stream-chunking-equivalence)
+- [★ Carrying the suite across a reimplementation](#-carrying-the-suite-across-a-reimplementation)
+- [Cross-language generated tables](#cross-language-generated-tables)
 - [Honest defects of this pattern](#honest-defects-of-this-pattern)
 - [What to run, and when](#what-to-run-and-when)
 
@@ -76,6 +79,24 @@ Rules:
   caught without pinning the whole payload.
 * Put the RE provenance in the message or a comment: the workflow id, or the device date that
   established it. When it is later refuted, the comment is where the correction goes.
+* **★ For a *bound*, assert the client's constraint — never the bytes you currently emit.** The
+  rules above are about *layout*. A bound is a different kind of claim and needs the opposite
+  treatment; see the correction immediately below.
+
+> **REFUTED.** *Previously implied by the rules above, and shipped:* "assert the exact bytes"
+> applies to every assertion in class 1, bounds included — so a capacity limit is pinned by asserting
+> the exact byte the encoder produces at the limit.
+> **Refuted by:** a shipped signedness bug. A green test named for a capacity *"still fitting in one
+> byte"* asserted precisely the value that **overflowed the client's signed read**, and the
+> post-mortem names that test as the reason the bug shipped: it converted the encoder's current
+> behaviour into the specification, so the encoder and its test were wrong together and agreed.
+> **Why it was attractive:** for layout the rule is exactly right, and byte assertions are the whole
+> reason this suite works. The failure is applying a *description* rule to a *constraint*.
+> **Correction:** phrase a bound as the property the client imposes — `enc_list(...)` caps `N` at the
+> client's array size; every host-chosen quantity round-trips through the client's own signed read
+> unchanged — so that a wrong constant **fails** rather than being enshrined. Detail:
+> [client-fidelity.md](client-fidelity.md) §15, and the signedness section of
+> [reply-re.md](reply-re.md).
 
 ### 2. State-machine transcript replay
 
@@ -114,8 +135,11 @@ in the message so the reader knows it is not a style preference.
 
 ### 4. Client-model simulation
 
-**Unit-test a model of the guest, not just your encoder.** This is the class people skip, and it
-is the one that catches windowing and pagination bugs you would otherwise find on a device.
+**Unit-test a model of the guest, not just your encoder.** This is the class people skip. It catches
+the windowing and pagination bugs you would otherwise find on a device — and, far more importantly,
+it is the only thing standing between a host-chosen quantity and **silent destruction of a player's
+property**. Read it in that order of priority: pagination is the tutorial case, the destructive case
+is why the class exists.
 
 Reimplement the client's cursor machine as you RE'd it, drive the **real** handler through it, and
 assert properties rather than values:
@@ -136,6 +160,35 @@ check(seen == set(catalog), "every catalogue entry is reachable")
 Three properties worth asserting for any paginated reply: **reachability** (nothing is
 unreachable), **bound** (no page exceeds the client's array), **termination** (the scroll ends).
 That is how you validate windowing arithmetic against a client you cannot run.
+
+#### ★ The destructive case: model the client's *apply* procedure
+
+**(A)** Wherever the client applies a host-chosen quantity through a **lossy procedure of its own** —
+a grant routine, a placement scan, an inventory merge — the model must reproduce that procedure
+*exactly*, including **how many times the client retries** and **whether it discards the retry's
+return value**. The assertion to write is not about layout at all:
+
+> **the host never authorises a quantity the client would partially destroy.**
+
+Three properties to add on top of the paginated three:
+
+| property | assert |
+|---|---|
+| **loss-freedom** | what the model actually *delivers* equals what the host authorised — not "it did not raise" |
+| **sequence-correctness** | several operations in a row are simulated against the **mutated** state, not each against the original snapshot |
+| **exhaustive sweep** | every point of the legal input space is checked, not a hand-picked sample. These input spaces are small; there is no excuse for sampling |
+
+**(B)** In the reference port this class caught what a "total free space" model authorises: the
+client's grant routine makes exactly **two** placements and **discards the second return value**, and
+its scanner exhausts every mergeable partial stack across all containers before it looks at a free
+cell. So an inventory holding two half-full stacks destroys units of a large delivery **even with ten
+empty cells**. Assertions named for the counterexample — *two partial stacks beat ten free cells*, *a
+multi-kind delivery shares the free cells*, *a withdraw into a full bag is refused, not swallowed*,
+*the deposit floor protects the remainder* — pin it. Three separate features in that title were
+destroying items through this same routine at the same time, and none of them logged anything.
+
+The client-side derivation is [client-fidelity.md](client-fidelity.md); this class is where it is
+kept honest.
 
 ### 5. Abuse-case regression
 
@@ -204,6 +257,66 @@ skeleton with the observed replies as expectations. Review it before committing 
 replies are *your server's* past behaviour, which is only the right expectation for the parts a
 device has confirmed. Mark the rest ⚠.
 
+## Stream-chunking equivalence
+
+**(A)** One assertion, worth writing on the first day and never touching again:
+
+> **the same requests, delivered one byte at a time, produce identical replies.**
+
+Feed a captured session through the decoder in chunks of 1, then in chunks of 7, then all at once,
+and compare the reply lists. It costs a loop and it covers the entire class of accumulate-and-
+dispatch bugs that otherwise appear only on a congested mobile link: a length word read across a
+chunk boundary, a partial frame dropped when a fresh buffer is allocated, a handler that reads past
+the bytes it has.
+
+It is also the property that lets you **retire the wire**. An in-process engine and a socket both
+present the client with a byte stream, so an engine that passes chunking equivalence answers
+identically however the transport happens to slice it — which is one of the two independent
+derivations that the client cannot tell the difference ([in-process-engine.md](in-process-engine.md)).
+
+## ★ Carrying the suite across a reimplementation
+
+**(A) The suite is the only thing that survives a rewrite.** When the protocol layer is reimplemented
+— a different language, a different process, an in-process engine — **port the comments, not only the
+code.** Every device-learned constraint that is not restated as an assertion in the new
+implementation's own suite is **silently lost**, and it is lost in the most expensive way: the
+knowledge cost device sessions to acquire and its absence is invisible until a player finds it again.
+
+Concretely, do these three things in the same commit as the port:
+
+1. **Enumerate the constraints** in the new module's header, in prose, before writing a line of it.
+   **(B)** the reference port's engine header lists five: never pad a list reply · both list-header
+   bytes are read signed · the cursor must be stateless · an empty notice body crashes the client · a
+   failure ack must carry its text in the same frame.
+2. **Restate each one as an assertion** in the new suite, with the *original* finding's date and
+   symptom in the message. A test whose message says only `enc_notice non-empty` has lost half of
+   what it knows.
+3. **Say so at the top of the new suite**, e.g. *"every assertion below that names a session is a
+   device-measured constraint a fresh implementation would otherwise lose"* — so nobody deletes one
+   as redundant.
+
+⚠ Expect to lose something anyway. The reference port dropped a dirty-check fast path during exactly
+this move and only noticed when page turns started stuttering. A diff of the two suites' assertion
+*messages* is a cheap check that nothing walked off.
+
+## Cross-language generated tables
+
+**(A)** When two implementations must agree on a table — a catalogue, an id map, a tier list —
+**generate it from the single authority** rather than hand-copying, and ship a **`--check` mode that
+regenerates in memory and compares**, wired into CI. A hand-copied table's failure mode is not a
+crash: it is a player buying something the authority delisted, or an identifier that resolves to a
+different thing on the other side. Neither looks like a stale table.
+
+Two details that make the pattern work:
+
+* **Generate from the authority's own objects**, not from its source text. **(B)** the reference
+  catalogue is not a constant at all — it is a computed product of several tier tables, content flags
+  and a delist set, each carrying a paragraph of device-measured reasoning. Nothing that reads like a
+  table can be copied faithfully by hand.
+* **Emit the generated file so your selftest can include it** (outer-style comments only, if your
+  language's inclusion mechanism is fussy), so the generated copy is under test rather than beside
+  it. See `${CLAUDE_PLUGIN_ROOT}/shared/selftest-convention.md`.
+
 ## Honest defects of this pattern
 
 Carried so a reader does not inherit them silently:
@@ -230,3 +343,5 @@ Carried so a reader does not inherit them silently:
 | before enabling or changing TLS | the e2e suite |
 | after any change to identity, sessions or the store | the unit suite **and** the exploit script |
 | in CI | both, plus a lint that fails on a committed database, transcript or archive blob |
+| in CI, if a table is generated | the generator's `--check` mode — a stale copy must fail the build, not ship |
+| after reimplementing the protocol layer anywhere | the **new** suite, and a diff of assertion messages against the old one |

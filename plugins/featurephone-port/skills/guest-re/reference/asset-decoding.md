@@ -73,6 +73,14 @@ Other things to pin before believing a sprite decoder:
 
 **Cross-validate against the game's own draw call.** Recipe E in [recipes.md](recipes.md) is the strongest form: find the draw site, read the frame index and the width/height it passes, and confirm your decoder produces exactly those dimensions for exactly that frame. Two independent derivations, per Rule 2.
 
+### The UI window chrome is a sheet in the same family **(A)**
+
+Sheet decoding is not only about character and item art. The game's **window chrome** — the border, the corner cut, the highlight and shadow rails, the panel fill — is normally a sprite sheet in the same member family as its icon sheets, which means **the decoder you already wrote for icons reads it with no changes at all**.
+
+In the reference port that was literally true: a ~2 KB chrome sheet decoded with zero modifications using a reader written many sessions earlier for the item atlas, and three separate chrome sheets in the same archive decoded the same way. The session's own note is the lesson — *"the decoder has been in the repo since session 44; we were only ever using it for icons."* **(B)** `HIGH / CONFIRMED`.
+
+Decode it early: it is how a host window gets its style from **measurement** instead of invention. What to measure and how to draw it is [game-native-ui.md](../../android-host/reference/game-native-ui.md) §9-§12; what to do with the result is [host-windows.md](../../android-host/reference/host-windows.md).
+
 ---
 
 ## 4. Record databases: parametrise and brute-force
@@ -92,6 +100,16 @@ Two further findings that generalise **(B, method A)**:
 
 * **One file can carry two on-disk layouts.** A format that grew across game versions may switch shape partway, or use a different layout for a different category. If your best configuration explains 80% of the file and then desynchronises, look for a second header rather than forcing one parse.
 * **Leading marker bytes often encode a category** — rarity, tier, shop availability. They look like padding until you tabulate them against records whose in-game properties you know.
+
+### Read the LOADER; do not tabulate the trailer **(A)**
+
+Brute force recovers the trailer's *size*. It does not recover its *meaning*, and correlating decoded bytes against in-game properties is a slow way to get a plausible wrong answer. **The game's own table loader tells you outright.** Disassemble the routine that builds the runtime row and read what it does with each field: it is short, linear and unambiguous.
+
+Reference case **(B)**: the runtime row is 24 bytes, built as name pointer, a copy, price, effect-string pointer, a copy — and then the record's **tail four bytes `memcpy`'d verbatim** into it. That last step is what identified `tail[0]` as a stat id and `tail[1]` as its magnitude; a correlation table over decoded records had suggested three equally plausible readings. `HIGH / CONFIRMED`.
+
+### The ROW COUNT usually lives in code, not in the file **(A)**
+
+A record stream tells you how many records **it** contains. It does not tell you how many the game will **read** — that is frequently a per-category constant compiled into the loader, with a hardcoded allocation to match (`count << 1` and similar). So the file alone cannot answer "will my extra row be seen", and shipping a row without the code constants is a wild read on the first screen that lists it. The three constants that have to move with it are in [patching.md](patching.md), *"Extending a guest data table"*.
 
 ---
 
@@ -146,6 +164,23 @@ Some members are encrypted. You will recognise them immediately: uniformly high 
 
 ## 7. Generating host assets from a closed set
 
+### First, check whether the game already ships a font **(A)**
+
+**It usually does — and the game's own font is the right source for your overlay's text layer.** A title that renders a syllabic or ideographic script carries its glyph banks as archive members, and those members decode by exactly the method in §1 and §4: assert `consumed == filesize`, and take every field's meaning from the **loader** rather than from the script's published standard.
+
+Two facts that decide the decode, both from the reference port **(B)**:
+
+* **The split between tables packed in one member is settled by the loader's own `memcpy` sizes and source offsets — and the FILE order can differ from the destination-address order.** Slicing by destination order produced a plausible, subtly wrong font; the loader's four copies (source offsets ascending, destinations *descending*) gave the correct split. Pin each slice length to the copy that produced it, and quote that site in the assertion message. `HIGH / CONFIRMED`.
+* **Composition is a routine you can read, so read it.** The guest's own composer — map the codepage index through a conversion table to a packed component code, split that into component indices, remap each through a component table, then **copy the first component's bitmap and OR the rest in**, with each component's variant selected by a table indexed on its *neighbouring* components — was ~220 bytes of Thumb. Never re-derive those rules from the script's standard; the game's rules are the ones its glyphs were drawn for. `HIGH / CONFIRMED`.
+
+Two consequences to know before you start: the game's font covers only the character set the **game** needed — a national-standard subset, not the full modern code space — so a host string outside that set silently draws nothing and needs a coverage test exactly as much as the generator below does; and the generated source is a derivative of the game's asset, so it is **licensed content** and belongs wherever your archive does, not in a public repository.
+
+The extraction procedure, the regeneration `--check` gate and the drawing rules belong with the host UI that consumes them — [game-native-ui.md](../../android-host/reference/game-native-ui.md) §1-§4, driven by `${CLAUDE_PLUGIN_ROOT}/tools/gen_gamefont.py`.
+
+### The fallback: generate a closed set from a system face
+
+Use this when the game ships **no** usable font, when its member is unreadable, or when your host strings fall outside the coverage the game's font has. The rest of this section is that path.
+
 **The problem.** Your overlay's built-in font is 5x7 ASCII: uppercase Latin, digits, and a handful of punctuation. A CJK label renders as **blank space** — not tofu, not a box, *nothing*. A missing glyph is an invisible hole, so it does not look like a bug; it looks like a layout mistake.
 
 **The insight (A).** The host draws a **closed, known set** of strings — your own labels, toasts and status lines. A full Hangul font is ~11,172 syllables and unshippable. The set you actually need is often under twenty glyphs.
@@ -191,4 +226,6 @@ Before you trust a decoder:
 - [ ] Round-trip byte-identical, if you intend to write the format back.
 - [ ] Cross-validated against the game's own use of the asset (a draw call's dimensions, a record count the game displays) — Rule 2.
 - [ ] No key, no `--key` flag, no encrypted member in scope.
+- [ ] Table row counts and trailer meanings were read from the game's **loader**, not inferred from the file (§4).
+- [ ] Before generating a host font, you checked whether the game ships one (§7).
 - [ ] Generated host assets have a coverage test, because a missing glyph is invisible.

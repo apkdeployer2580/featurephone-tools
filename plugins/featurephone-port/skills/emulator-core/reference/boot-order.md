@@ -14,6 +14,8 @@ is title-specific, and even then only its *values* are — the discovery method 
 6. [#5 List allocator never coalesces](#6-5-list-allocator-never-coalesces)
 7. [#6 Reporting an allocation failure allocates](#7-6-reporting-an-allocation-failure-allocates)
 8. [Boot mechanics you must understand to read a boot failure](#8-boot-mechanics-you-must-understand-to-read-a-boot-failure)
+   - [8b. The second AOT carrier has a different boot chain, and no self-rebase](#8b-the-second-aot-carrier-has-a-different-boot-chain-and-no-self-rebase)
+   - [8c. `install_binary_patches` was either/or](#8c-install_binary_patches-was-eitheror)
 9. [`WieError` variants and where each surfaces](#9-wieerror-variants-and-where-each-surfaces)
 10. [Full triage table: symptom → cause → file](#10-full-triage-table-symptom--cause--file)
 
@@ -170,14 +172,21 @@ in the emulator's *error path*. Port it verbatim.
 
 ## 8. Boot mechanics you must understand to read a boot failure
 
+**There is more than one of these.** The chain below is the **KTF** (first AOT carrier) path, and it
+is the one every wie walkthrough shows. A second AOT carrier loads by ELF section and does something
+materially different — [8b](#8b-the-second-aot-carrier-has-a-different-boot-chain-and-no-self-rebase).
+Read your own loader per carrier and write both chains down before you debug either.
+
 The KTF native load path, in order:
 
 1. `parse_bss_size(filename)` — **the BSS size is encoded in the jar entry's filename**
    (`client.bin<N>` → N bytes of BSS appended after the image). A porter who overlooks this
    concludes that guest addresses past EOF are invalid; they are not.
 2. `core.load(data, IMAGE_BASE, data.len() + bss_size)`.
-3. `install_binary_patches` — a hash-keyed table. A stale table logs
-   `entry X: hash matched but produced 0 patches/hooks`.
+3. `install_binary_patches` — hash-keyed **and** generic pattern entries. A stale entry logs
+   `entry X: hash matched but produced 0 patches/hooks`; a subtler failure mode is that generic
+   entries never install at all —
+   [8c](#8c-install_binary_patches-was-eitheror).
 4. Register the SVC handlers, one per category.
 5. `run_function(IMAGE_BASE + 1, &[bss_size])` — the `+1` is the Thumb bit; the guest
    **self-rebases** at that entry point.
@@ -187,6 +196,65 @@ The KTF native load path, in order:
 warning** for anything else. A game asking for a third interface gets a null pointer and dies far
 from the cause. **On a new title, grep the boot log for that warning first.** Likewise
 `Unknown SVC handler category: N` means the guest issued an SVC in a category no handler claims.
+
+### 8b. The second AOT carrier has a different boot chain, and no self-rebase
+
+> **REFUTED.** *Previously documented (this section, as "the" boot path):* the six-step chain above —
+> BSS size parsed out of the native member's **filename**, one `core.load` at a fixed `IMAGE_BASE`,
+> and a guest that **self-rebases** at `IMAGE_BASE + 1`. **Refuted by** bringing a second carrier's
+> package up on the same host: that loader parses **ELF headers**, and for every section with
+> `sh_addr != 0` does `core.load(section, sh_addr, sh_size)`, then collects the executable ranges and
+> runs `e_entry`. There is **no BSS-in-the-filename convention, no single image base, and no rebase
+> step at all.** **Why the wrong reading was attractive:** the first carrier's chain is internally
+> complete — nothing in it announces that it is one of two — and it is the chain the emulator's own
+> test corpus exercises. **Consequence if carried forward:** on a section-mapped build you spend the
+> first day looking for a rebase that never happens, and you compute guest addresses as
+> `file offset + IMAGE_BASE` — correct on the first carrier, meaningless on the second, where the
+> section headers *are* the mapping. Every static tool you write inherits the error silently.
+
+Two consequences worth knowing before you meet them **(A)**:
+
+- **The address model differs in kind, not just in its numbers.** `file offset + IMAGE_BASE` versus a
+  per-section `sh_offset → sh_addr` map is the difference between a working disassembler script and
+  one that quietly reads the wrong bytes. Pin it once, in the file every static tool reads:
+  [address-model.md](../../guest-re/reference/address-model.md). A tool that hardcodes one section's
+  mapping cannot see the others at all, which is how a whole data section stays invisible for months
+  — [static-toolkit.md](../../guest-re/reference/static-toolkit.md).
+- **Section mapping is page-rounded, so the tail past the declared BSS end is mapped memory belonging
+  to no section.** That tail is usually a better host scratch area than any "proven-dead" code cave,
+  and it can be argued mostly statically. ⚠ Confirm the rounding in *your* loader before relying on
+  it; the reference port confirmed it by writing a sentinel there and reading it back byte-identical
+  after a boot plus several thousand frames of play and one in-game save.
+  [patching.md](../../guest-re/reference/patching.md).
+
+### 8c. `install_binary_patches` was either/or
+
+> **REFUTED.** *Previously documented (item 3 above):* "`install_binary_patches` — a hash-keyed
+> table. A stale table logs `entry X: hash matched but produced 0 patches/hooks`" — i.e. the only
+> documented failure was a stale entry. **Refuted by** counting what actually installed: the installer
+> `return`ed as soon as the **first hash-keyed entry matched**, so every *generic* pattern entry in
+> the shipped table — six of them — had **never installed on any build**, for years, while the boot
+> log said `Installed 1 hooks` and nobody questioned the number. **Why the wrong reading was
+> attractive:** an early `return` after a successful match reads as an optimisation; the log line is
+> *true*; and a hook that never runs produces no symptom, only the absence of a speedup you had
+> already attributed to something else. **Consequence if carried forward:** you credit a measured
+> change to a hook that cannot have run, and every generic hook you add afterwards is dead on
+> arrival.
+
+**(A) The fix is not "call the installer twice."** The second call re-registers the patch dispatcher's
+SVC handler and dies with `SVC handler already registered`. Install as **one unit**: resolve every
+matching entry's hooks first, check patch↔hook site overlap across the **merged** list, let the
+earlier (hash-keyed) entry win a conflicting site, and register the dispatcher exactly once.
+
+**(A) Then re-derive the expected payoff per compile, because generic byte patterns encode a
+COMPILER's idioms, not a game's.** **(B)** Once the merged installer let the reference port's six
+generic library hooks finally install, the measured gain on the second carrier's build was **exactly
+zero** — identical instruction, SVC and batch counts — because those patterns had been written against
+the first compiler's idioms while the second compile is stack-spill-heavy with call veneers. The
+refactor was kept (structurally correct, zero regression), but the *benefit* has to be re-measured per
+compile. `HIGH / CONFIRMED`. Installer discipline — including why a **keyed** entry matching zero
+sites must be fatal while a **generic** one is only a warning — is
+[guest-pixel-loops.md](guest-pixel-loops.md) §17–§19.
 
 ---
 
@@ -225,9 +293,24 @@ porting, because a continue turns one legible line into a flood.
 | Stutter proportional to sprite count or on full-screen effects | full-framebuffer round-trip per draw call | [graphics-perf.md](graphics-perf.md) |
 | Wrong colours or black bands after a fill | read-skipping canvas used where the fill does not cover the band | [graphics-perf.md](graphics-perf.md) §4 |
 | Frame budget blown, log flooded with one repeating record | `tracing::instrument` at INFO on a per-frame path | [hardening-batch.md](hardening-batch.md) §5 |
-| Saves always read as an empty slot | record-size query mode returns 0 for this platform build | [wipi-c-recipes.md](wipi-c-recipes.md) §7 |
-| "Reset save" leaves the old save in place | name-keyed record delete is a no-op upstream | [wipi-c-recipes.md](wipi-c-recipes.md) §7 |
+| **Every** slot reads as empty from boot 1, for a save that never existed | record-size query mode returns 0 for this platform build | [wipi-c-recipes.md](wipi-c-recipes.md) §7 |
+| A slot that **used to work** now reads as empty | **deletion**, not a read bug — a create-mode open that truncated up front, a truncate left armed by a failed write, or a non-atomic replacement. A guest cannot report "failed", only "empty" | [wipi-c-recipes.md](wipi-c-recipes.md) §7a, [save-integrity](../../save-integrity/SKILL.md) |
+| A save is silently lost although the game said it saved | the store's write verdict was discarded instead of returned to the guest | [wipi-c-recipes.md](wipi-c-recipes.md) §7a |
+| "Reset save" leaves the old save in place | name-keyed record delete is a no-op upstream — one instance of the release-side stub rule | [wipi-c-recipes.md](wipi-c-recipes.md) §2, §7 |
 | In-game volume control does nothing | clip volume stub; the clip **handle changes** between set-volume and play | [wipi-c-recipes.md](wipi-c-recipes.md) §8 |
+| Music inaudible even at maximum phone volume | synth default output gain, and/or the hardware volume rocker not pinned to the media stream | [audio-core.md](audio-core.md), [audio-mixing.md](../../android-host/reference/audio-mixing.md) |
+| Music and effects wildly imbalanced at the same in-game setting | two different volume laws — one bus scaled in the synthesis domain | [audio-core.md](audio-core.md) §4–§5 |
+| Music cuts out and **restarts from the beginning** whenever an effect plays | the guest owns exactly one sound slot; the host must defer music stops | [audio-core.md](audio-core.md) §10–§13 |
+| Effects inaudible only on some songs, or only with every slider raised | a static limiter on the **sum** starves whichever signal is added later | [audio-mixing.md](../../android-host/reference/audio-mixing.md) |
+| A burst of noise plus a frame spike on every resume from background | a sequencer on a wall clock dispatching its whole backlog in one poll | [audio-core.md](audio-core.md) §16 |
+| A frame hitch on **every** sound | the archive resource path or a synchronous platform call — not the audio decoder | [hardening-batch.md](hardening-batch.md) §7 |
+| Total silence on one tester's device only | a single failed output-device open, with no retry and no self-report | [audio-mixing.md](../../android-host/reference/audio-mixing.md) |
+| Emulator exits at the **first** call into one subsystem, with no `Unimplemented` line, on a second carrier's build | that runtime crate names only a few slots in the block and its `_ =>` arm is `FatalError` | [wipi-c-recipes.md](wipi-c-recipes.md) §3a |
+| Boot log says `Installed 1 hooks` and a generic hook you added never fires | the patch installer returned after the first matching entry | §8c above |
+| Every screen is slow, but each report names one screen; host thread mostly idle | two host sleep grids each rounding the guest's timer period up, multiplying | [frame-pacing.md](frame-pacing.md) |
+| The whole game runs at N× speed after visiting several screens | timer cancel is a no-op while arming **pushes** instead of replacing a keyed shot | [frame-pacing.md](frame-pacing.md) §8 |
+| Millions of guest instructions per frame with only a handful of platform draw calls | the game rasterises in its own guest code; your graphics layer is not the cost | [guest-pixel-loops.md](guest-pixel-loops.md) |
+| "It restarts when I switch away and come back" — no crash dialog, no tombstone | eager guest-heap commit makes the process the low-memory killer's first pick | [memory-footprint.md](memory-footprint.md) |
 | A guest class resolves to `ClassNotFoundException` and the game silently misbehaves | missing emulator-provided Java class | [java-class-recipes.md](java-class-recipes.md) |
 | `FatalError("Undefined instruction")` | genuinely missing opcode | [diagnostics.md](diagnostics.md) §6 |
 | Garbage behaviour, faults at an unrelated `pc` | silently wrong opcode semantics | [diagnostics.md](diagnostics.md) §6 |

@@ -1,14 +1,22 @@
 # Graphics: killing the full-framebuffer round-trip
 
-Upstream's WIPI graphics path costs **call count × full screen**, not pixels drawn. On a title that
-issues hundreds of draw calls a frame this is the difference between shipping and not.
+Upstream's WIPI graphics path costs **call count × full screen**, not pixels drawn. Where a title
+issues hundreds of draw calls a frame that is the difference between shipping and not — and **where it
+does not, this whole file is the wrong layer**, so §1 is a measurement, not an argument.
+
+**Scope.** This file owns the **emulator's own** draw path: the framebuffer round-trip, row bands, the
+canvas, and the equivalence tests that make rewriting it safe. The **guest's** pixel loops — a game
+that takes the framebuffer pointer once and rasterises in its own ARM code — are
+[guest-pixel-loops.md](guest-pixel-loops.md), including the census that finds them, the hook
+discipline, and the identity proof. The frame budget both of them have to fit inside is
+[frame-pacing.md](frame-pacing.md).
 
 ## Contents
 
-1. [Symptom and measurement](#1-symptom-and-measurement)
+1. [Measure first: count the platform draw calls, per screen class](#1-measure-first-count-the-platform-draw-calls-per-screen-class)
 2. [Layer 1: row bands](#2-layer-1-row-bands)
 3. [Layer 2: read directly into typed pixels](#3-layer-2-read-directly-into-typed-pixels)
-4. [Layer 3: skip the read for covering fills](#4-layer-3-skip-the-read-for-covering-fills)
+4. [Layer 3: fills — write only the rectangle (16 bpp), covering-fill band otherwise](#4-layer-3-fills--write-only-the-rectangle-16-bpp-covering-fill-band-otherwise)
 5. [Layer 4: span intersection and raw row copies in the canvas](#5-layer-4-span-intersection-and-raw-row-copies-in-the-canvas)
 6. [The one accepted semantic delta](#6-the-one-accepted-semantic-delta)
 7. [Equivalence tests — the whole safety argument](#7-equivalence-tests--the-whole-safety-argument)
@@ -17,10 +25,36 @@ issues hundreds of draw calls a frame this is the difference between shipping an
 
 ---
 
-## 1. Symptom and measurement
+## 1. Measure first: count the platform draw calls, per screen class
+
+**(A) Before optimising this path, count what goes through it.** Two counters — platform draw calls
+per frame, and guest instructions per frame — decide which layer you are allowed to work on, and on a
+real title the answer **differs per screen class**:
+
+| Reading | What it means | Where the work is |
+|---|---|---|
+| Hundreds to thousands of platform draw calls per frame | the game draws through the platform API | this file |
+| A handful of draw calls, millions of guest instructions per frame | the game took the framebuffer pointer once and rasterises in its own code | [guest-pixel-loops.md](guest-pixel-loops.md) |
+
+> **REFUTED.** *Previously documented (this file's own opening):* "Upstream's WIPI graphics path costs
+> **call count × full screen** … on a title that issues hundreds of draw calls a frame this is the
+> difference between shipping and not" — stated as a property of the title. **Refuted by** counting
+> the calls: a real **field** frame in the reference port issued **12** platform draw calls and
+> **zero** image blits while executing **2.46 M guest instructions**, so the round-trip work barely
+> participates in the field at all. **Why the wrong reading was attractive:** the round-trip really is
+> enormous *per call*, the arithmetic is compelling, and the fix is real — it simply was not the cost
+> on the screen the player was complaining about. **Consequence if carried forward:** you spend a week
+> on the framebuffer path and the field still stutters, because the game rasterises in guest code that
+> your graphics layer never sees.
+>
+> **The headline is not wrong; it is screen-specific.** The same title's menu, panel and dialogue
+> screens issued **1,650–2,450 fill-rect calls per frame** and ran at **5–7 fps** on a low-end device —
+> squarely this file's problem. **Both answers occur in one title**, so count per screen class and
+> never generalise from one frame.
 
 **What the porter sees.** "Maps with a lot to render stutter compared to sparse maps." A
-full-screen effect hitches. Frame time tracks the *number* of draw calls, not the pixel count.
+full-screen effect hitches. A panel or dialogue screen is dramatically slower than the field. Frame
+time tracks the *number* of draw calls, not the pixel count.
 
 **What upstream actually did on every WIPI draw call:**
 
@@ -32,10 +66,9 @@ full-screen effect hitches. Frame time tracks the *number* of draw calls, not th
 
 **A 1×1 pixel write paid roughly 0.7 MB of memcpy plus two large `Vec` allocations.**
 
-Confirm before optimising: the work gauge (guest instructions per frame) tells you whether the cost
-is in the guest's own rasterisation or in your host path. If the guest is executing millions of
-instructions per frame it is drawing in guest code and the framebuffer round-trip is exactly what
-you are paying for.
+On a panel screen at 1,650–2,450 such calls per frame that is the entire frame budget, several times
+over. On a field frame at 12 calls it is noise. Same build, same day — which is the whole reason the
+count comes first.
 
 ## 2. Layer 1: row bands
 
@@ -100,10 +133,38 @@ fn pixel_rows<P: Pod>(&self, ctx: &mut dyn WIPICContext, y: i32, h: i32) -> Resu
 to 2, and an allocator handing back alignment-1 memory is legal. Casting a `&mut [P]` **down** to
 `&mut [u8]` is always sound; that is the direction to use.
 
-## 4. Layer 3: skip the read for covering fills
+## 4. Layer 3: fills — write only the rectangle (16 bpp), covering-fill band otherwise
 
-A fill that spans the **full framebuffer width** repaints every pixel of its band, so reading the
-band first is pure waste.
+**★ SUPERSEDED, and the newer method is the primary path (A).** For a 16 bpp destination, write
+**only the rectangle's own pixels**: no band read, no band write, no allocation. Fall back to the
+banded canvas below only for other depths.
+
+**Why it supersedes the band.** The banded path costs roughly **1 KB read + 1 KB written + 1 KB
+zeroed per call to change ~16 bytes** — and the call sites that dominate are the panel screens issuing
+1,650–2,450 fills per frame (§1). The covering-fill trick below removes one of those three kilobytes,
+for the subset of fills that span the full width. Writing the rectangle removes all three, for every
+fill.
+
+**Why it is safe to claim byte identity, and how to pin it (A):**
+
+- For 16 bpp the colour round trip is the **identity across all 65 536 values** — check it
+  exhaustively in a test, it runs in milliseconds. That is what licenses bypassing the canvas rather
+  than merely hoping.
+- Pin the new path against the old one with a table test that **deliberately reproduces the old path's
+  asymmetric clamping** — negative origins, over-long spans, zero width/height, a rectangle wholly
+  off-screen on each edge. **(B)** Fourteen cases in the reference port. If the two paths disagree
+  anywhere, the *old* behaviour wins: you are optimising, not fixing.
+- **Order the call site so the fast path is tried first and falls through**, rather than duplicating
+  the clip arithmetic in two places.
+
+**When the older method below is still the right answer:** any destination that is not 16 bpp, and any
+fill whose colour handling is not an identity round trip in your build. Keep it; it is the fallback,
+not dead code.
+
+### The covering-fill band, retained as the fallback
+
+A fill that spans the **full framebuffer width** repaints every pixel of its band, so reading the band
+first is pure waste.
 
 ```rust
 impl FrameBuffer {
@@ -221,4 +282,12 @@ reimplementation, fetch the guest's own buffer, and diff the pixels. Two rules:
   could print nothing. Say so in `--help` and in the example.
 
 Differential verification against the guest is the strongest verification technique in this
-methodology, but the host-side reimplementation it verifies belongs to the `android-host` skill.
+methodology. What it usually verifies is a **host reimplementation of one of the game's own pixel
+loops**, and that — the census that finds them, choosing the hook site, the exit-address proof
+obligation, and why a matching frame hash can still prove nothing — is
+[guest-pixel-loops.md](guest-pixel-loops.md). Two things from there are worth knowing before you plan
+any of this work: a title commonly has **three or four distinct per-pixel loops** needing separate
+hooks, the rarest of which is only findable by a **differential** profile (one run stopped before the
+effect, one containing it); and **generic byte patterns encode a compiler's idioms, not a game's**, so
+a pattern-matched hook that paid off on one carrier's compile can measure **exactly zero** on
+another's ([boot-order.md](boot-order.md) §8c).

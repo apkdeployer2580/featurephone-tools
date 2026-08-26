@@ -16,6 +16,7 @@ Provenance: **(A)** generic · **(B)** worked example from one reference port ·
 10. [The Kotlin stdlib duplicate-class trap](#10-the-kotlin-stdlib-duplicate-class-trap)
 11. [Candidate-list tool discovery](#11-candidate-list-tool-discovery)
 12. [Where every version is pinned](#12-where-every-version-is-pinned)
+13. [Before you attribute a number to anything in this file](#13-before-you-attribute-a-number-to-anything-in-this-file)
 
 ---
 
@@ -140,6 +141,16 @@ codegen-units  = 1
 * `opt-level = 3` on **dev** as well: the whole app is an instruction-decode/dispatch hot loop
   (order of a few million guest instructions per rendered frame). An unoptimised debug build is
   not merely slow, it is unusable and you cannot test anything on it. **(A)**
+  ⚠ **But that makes a debug build TESTABLE, not MEASURABLE.** `[profile.dev]` with only
+  `opt-level = 3` still has **debug assertions and overflow checks on**, and an overflow check lands
+  on *every arithmetic operation* of a CPU interpreter. **(B)** Measured on one device, on the same
+  scene: the emulator thread went from **89.6 % of a core to 64.5 %** purely by switching from the
+  debug artifact to the release one. Nothing about the code changed.
+  → **Gate every performance claim on a release artifact**, and confirm which one you are holding by
+  reading the built package's own flags (the debuggable flag) rather than by remembering which
+  profile you used. **(B)** In the reference port the artifact was identified as debuggable *after*
+  a whole "this phone is too slow" analysis had been done on it. If you do intend to measure on dev,
+  set `debug-assertions = false` and `overflow-checks = false` there and write down why.
 * `codegen-units = 1` + `lto` because the hot loop is one function-cluster; splitting codegen
   units costs inlining exactly there.
 * **Explicitly not `panic = "abort"`.** It breaks `cargo test`, and this app unwinds across JNI
@@ -164,6 +175,19 @@ second issued from inside the tick loop, on the thread with a ~24 ms frame budge
 
 Single ABI `arm64-v8a`: halves build time and APK size, and every Android phone since roughly
 2017 is arm64. Add `armeabi-v7a` only if you have an actual 32-bit target device. **(A)**
+
+**(A) "Support older devices" almost never means "add a 32-bit ABI".** Check before you assume:
+**(B)** a several-generations-old flagship used as the reference port's low-end baseline (2018 SoC,
+3.6 GB RAM, Android 10) still reports the 64-bit ABI first, so supporting it required changing
+nothing at all. The devices that are genuinely 32-bit are older than the ones anyone is still
+playing on.
+
+**(A) And there is a counter-reason, not just an absence of reasons.** If your emulator raises the
+interpreter thread's **reserved stack** as a mitigation — which
+[hardening-batch.md](../../emulator-core/reference/hardening-batch.md) recommends, and which costs
+nothing in a 64-bit address space because reserved pages are not committed until touched — then
+adding a 32-bit ABI converts that free mitigation into a genuine address-space hazard. **(B)** The
+reference port refused the 32-bit build on exactly those two grounds, and recorded both.
 
 Keep `--platform` (cargo-ndk) equal to `minSdk` (Gradle). A mismatch links against a different
 API level than the app declares, and the symptom appears only on the oldest device you test on —
@@ -244,3 +268,22 @@ behaves identically — is a mechanical, zero-risk change. **(A)**
 
 Keep this table in the project README too. Every one of these is a thing a new contributor will
 have wrong on their first attempt, and every one produces a different confusing error.
+
+## 13. Before you attribute a number to anything in this file
+
+The profile and ABI choices above are the two settings people most often "measure". Three rules
+decide whether the measurement means anything, and all three have produced wrong conclusions:
+
+1. **Release artifact only** (§7). A debuggable build is wrong by tens of percent while looking
+   entirely plausible.
+2. **Check the device's own frequency policy.** A vendor performance policy can pin the big cores to
+   the little cores' maximum with no battery saver and no thermal event, and no code can lift it —
+   which reads as "this phone is slow" rather than "this phone is capped".
+3. **Interleave runs and take the median.** **(B)** One host produced intermittent 25 %-faster
+   outliers; the `codegen-units = 1` gain in §7 measured **106.5 vs 102.2 M inst/s** as the median of
+   three interleaved runs — real, and invisible to any single measurement.
+
+Rules 1 and 2 are worked in full, with the device measurements, in
+[crash-triage.md](crash-triage.md#9-measure-on-a-release-artifact-and-check-the-devices-own-frequency-policy);
+what to do about a number once it is trustworthy belongs to
+[emulator-core](../../emulator-core/SKILL.md).

@@ -6,17 +6,35 @@
   },
   "metadata": {
     "description": "Tooling for remaking original feature-phone (WIPI/KTF/LGT/SKT/J2ME) games as native apps on a forked wie emulator core.",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "featurephone-port",
       "source": "./plugins/featurephone-port",
-      "description": "Remake an original WIPI/KTF, LGT, SKT or J2ME feature-phone game .jar as a native Android app on a forked wie emulator core: archive repair, core porting, guest reverse engineering, touch host layer, dead-server revival, signing and a publish audit.",
-      "version": "0.1.0",
+      "description": "Remake an original WIPI/KTF, LGT, SKT or J2ME feature-phone game .jar as a native Android app on a forked wie emulator core: archive repair, core porting, guest reverse engineering, multi-build support, the touch host layer, gamepad and audio, save-data integrity, dead-server revival or in-process retirement, signing and a publish audit.",
+      "version": "0.2.0",
       "license": "MIT",
       "category": "development",
-      "keywords": ["wipi", "ktf", "lgt", "skt", "j2me", "midp", "emulator", "android", "arm", "thumb", "game-port", "reverse-engineering"]
+      "keywords": [
+        "wipi",
+        "ktf",
+        "lgt",
+        "skt",
+        "j2me",
+        "midp",
+        "emulator",
+        "android",
+        "arm",
+        "thumb",
+        "game-port",
+        "reverse-engineering",
+        "save-data",
+        "multi-build",
+        "touch-controls",
+        "gamepad",
+        "audio"
+      ]
     }
   ]
 }

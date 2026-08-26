@@ -8,6 +8,11 @@ before you spend a day on it.
 Provenance tags: **(A)** generic procedure · **(B)** worked example from the reference port ·
 **(C)** do not copy. See `${CLAUDE_PLUGIN_ROOT}/shared/evidence-standard.md`.
 
+**Numbering.** Chapters 0–19 are numbered as first published. Two have been added since — **11a**
+(save integrity) and **20** (the play-feedback loop) — and the existing numbers are deliberately
+**not** renumbered, because other documents, notes and half-finished ports all cite them. A stable
+reference is worth more than a tidy sequence.
+
 ## Contents
 
 - [At a glance](#at-a-glance)
@@ -18,10 +23,11 @@ Provenance tags: **(A)** generic procedure · **(B)** worked example from the re
 - [Phase V — change the guest, prove it (13–14)](#phase-v--change-the-guest-prove-it-1314)
 - [Phase VI — the network chapters, optional (15–17)](#phase-vi--the-network-chapters-optional-1517)
 - [Phase VII — ship (18–19)](#phase-vii--ship-1819)
+- [Phase VIII — the loop a live port runs in (20)](#phase-viii--the-loop-a-live-port-runs-in-20)
 - [Re-entry points](#re-entry-points)
 - [What changes for a JVM-bytecode guest](#what-changes-for-a-jvm-bytecode-guest)
-- [What changes for an offline title](#what-changes-for-an-offline-title)
-- [The five gates you must not skip](#the-five-gates-you-must-not-skip)
+- [Three shapes of network title, and what each one costs](#three-shapes-of-network-title-and-what-each-one-costs)
+- [The seven gates you must not skip](#the-seven-gates-you-must-not-skip)
 
 ---
 
@@ -40,7 +46,8 @@ Provenance tags: **(A)** generic procedure · **(B)** worked example from the re
 | 8 | String index and feature inventory | `guest-re` | Committed offset↔text listing; the online-only feature list |
 | 9 | Map live state, prove offsets | `guest-re` | Every offset you will build on has **two independent derivations** |
 | 10 | First device build and run | `port-shipping` | A debug APK installs and renders on a phone |
-| 11 | Input, screen, storage on device | `android-host` | Playable with defaults; saves survive a kill; DB layout matches the probe |
+| 11 | Input, screen, storage on device | `android-host` | Playable with defaults; a save survives a kill **and** an injected mid-write failure; DB layout matches the probe |
+| 11a | Save integrity | `save-integrity` | The adversarial storage pass passes, and a device walk of the reported slot sequences shows one verdict line per write |
 | 12 | Touch HUD and layout editor | `android-host` | Controls placeable and persisted; resolver invariant holds |
 | 13 | Host↔guest reads, patches, calls | `guest-re` + `android-host` | An idempotent patch; one guest call chain completes on device |
 | 14 | Reimplement widgets, verify | `android-host` | Probe reports **0 mismatched pixels** on ≥2 game states |
@@ -49,6 +56,7 @@ Provenance tags: **(A)** generic procedure · **(B)** worked example from the re
 | 17 | Replacement server, tests, deploy | `server-revival` | Conformance suite passes; service survives restart and network reset |
 | 18 | Release build, signing, distribution | `port-shipping` | Signed APK, incrementing versionCode, config verified **inside the .so** |
 | 19 | Publish audit | `port-shipping` | Audit clean across **all refs**; licences present; no content, key or credential |
+| 20 | The play-feedback loop | `port-triage` → the owner of the finding | Every shipped build is recorded with the build id **and** its open device-verification item |
 
 ---
 
@@ -81,18 +89,28 @@ Provenance tags: **(A)** generic procedure · **(B)** worked example from the re
 
 - **Owner:** `archive-prep`
 - **Entry:** platform known.
-- **Exit, all four:**
+- **Exit, all five:**
   1. the app descriptor contains **zero CR bytes**;
   2. the AID equals the inner jar's basename exactly;
   3. the native member's name parses to a BSS integer;
   4. no private save entries remain (`P/…` and anything shaped like a save record), and every
-     surviving member is **byte-identical** to the source.
+     surviving member is **byte-identical** to the source;
+  5. every generator's `--check` is clean — the archive **this machine** ships matches the tables
+     **this repository** holds. That is a separate claim from any of the first four, and the only
+     one that survives a second checkout.
 - **Fails like (B, reproduced):** `loaded` prints and *then* the Java runtime panics with
   `NotFound` — the descriptor had CRLF, so the AID carried a trailing `\r` and the jar lookup
   missed by one byte. Also: `Main class not found`; a null unwrap out of `loadClass` (wrong
   main-class key); `Invalid bss_size in filename` (native member renamed).
+- **Also fails like (B, shipped):** the game boots, shows its title and dies a few hundred frames
+  later with a **negative-size allocation failure** — a data member and a guest constant disagree
+  about a table. Nothing in the boot path can see it; ten consecutive releases went out that way.
 - **Trap (A):** repacking with a different zip writer legitimately changes the archive's size.
   **Size is not a validity check** — compare member by member.
+- **Trap (A):** the archive is gitignored, so **archive work does not travel with a commit**. With
+  more than one checkout you will eventually ship an input that lags its own source — the commit is
+  there and the result is not. This is the second re-entry trigger for this chapter, and its first
+  command is a check, not an edit.
 - **Refutation carried (A):** bundled private save entries do **not** seed a new user's database.
   Packaged-database reads resolve through the classloader (jar resources) while those entries
   land in the virtual filesystem — two different namespaces. Strip them because they are somebody
@@ -137,6 +155,13 @@ Provenance tags: **(A)** generic procedure · **(B)** worked example from the re
   sequence lands in the log at once.
 - **Exit:** no fatal unimplemented stub across the first N minutes of scripted input, and every
   "unknown interface" warning is understood rather than ignored.
+- **⚠ Trap (A), and it limits the rule above:** a logging no-op is the right treatment for *query*
+  and *set* calls, whose caller only needs a plausible answer. It is **not** right for a
+  release-side call — a `free`, a `close`, an `unset timer`. There the no-op is a **leak**, and it
+  reports far from its cause: timers accumulate, handles run out, memory climbs, and the symptom is
+  a game that gets slower the longer it is played. **(B)** One reference port ran for many sessions
+  on a stubbed timer-unset before that connection was made. When you stub a release-side call,
+  record it as a *known leak with an expiry*, not as a placeholder.
 - **Fails like:** frozen screen plus exactly one log line naming a table id and slot. That single
   line *is* the workflow — it tells you which function to implement.
 - **Trap (A):** an interface table shorter than the slot the guest indexes reads past the
@@ -149,6 +174,11 @@ Provenance tags: **(A)** generic procedure · **(B)** worked example from the re
 - **Entry:** the game plays headless for minutes.
 - **Exit:** 30k headless frames with no allocation failure; the heap gauge's LIVE count flat in
   steady state; the vendored crates' own tests pass.
+- **(A) The long run is a second, independent gate, not a longer version of chapter 4's.** Chapter 4
+  asks "did anything draw?"; this one asks "does it survive?" — and the class it catches is
+  **death shortly after the title screen**, which a first-frame check reports as healthy. Assert
+  **zero fatal tick errors**, not just no allocation failure. **(B)** A build range that died at
+  frame 557 passed every boot smoke test it was given; the fixed build ran 5,200 frames clean.
 - **Fails like (A), all four are emulator defects rather than title bugs:** progressive slowdown
   then `AllocationFailure` with free memory plentiful (a guest list allocator that never
   coalesces); steady-state stutter with a header-bytes counter climbing into GB (a bitmap
@@ -221,7 +251,32 @@ Provenance tags: **(A)** generic procedure · **(B)** worked example from the re
   size from the (long, short) sides plus the persisted orientation preference, never from
   `width > height`.
 - **Trap (A):** storage writes must be synchronous — "on disk by the time the call returns" is
-  what makes save-then-kill safe.
+  what makes save-then-kill safe. **Synchronous is necessary and nowhere near sufficient**, which
+  is what chapter 11a is for.
+
+### Chapter 11a — Save integrity
+
+- **Owner:** `save-integrity`
+- **Entry:** saves are being written on a device.
+- **Why it is a chapter of its own:** "saves survive a kill" is compatible with **every** save loss
+  a real port ships. **(B)** In the reference port, on builds that passed chapter 11's criterion, a
+  character could still be destroyed by a failed write that left a truncate armed, by an
+  open-with-no-write, by a non-atomic replacement, by a write landing in the wrong slot because the
+  slot index in the record name is a **UI cursor** rather than an identity, or by a server reply to
+  a request the client never meant as a restore. Five separate fixes shipped and were refuted before
+  the model was right.
+- **Exit, both:**
+  1. an **adversarial storage pass** — an injected mid-write failure leaves the previous record
+     byte-identical; an open-with-no-write on another slot is refused; a whole-database delete
+     archives first; a restore applies at next launch and costs exactly one retention seat;
+  2. a **device walk of the reported slot sequences** with one verdict line per write in the log,
+     showing the pin re-established on every load and no write landing outside it.
+- **Trap (A):** a guest record store can only ever report a slot as *empty*, never as *corrupt* — so
+  every "my character disappeared" report is a **deletion or truncation** event, and debugging the
+  serialiser is time spent in the wrong layer.
+- **Trap (A):** guard **every** path that produces the event before you claim the class is closed.
+  **(B)** One reference fix guarded one of two load paths and re-destroyed saves one build later.
+- Everything here: `/featurephone-port:save-integrity`.
 
 ### Chapter 12 — Touch HUD and layout editor
 
@@ -323,7 +378,14 @@ Skip all three if §4 of the router found no server-only strings.
   localhost. Scan the artifact for the wanted string; scanning for the *fallback* string proves
   nothing, because the fallback is always present in the binary.
 - **Trap (A):** the output filename is the answer to "can anyone install this?" — an unsigned
-  release build succeeds and is named accordingly. Do not ignore it.
+  release build succeeds and is named accordingly. Do not ignore it. Do not rename it either: the
+  install step finds the artifact by that name, so a handout is a **copy**, never a rename.
+- **Trap (A):** every gate in this chapter answers "is the artifact well-formed?" and none answers
+  "are its inputs current?". Run the generators' `--check` as stage 0 and a long soak before the
+  handout, or you will sign, verify and distribute a build that dies after the title screen.
+- **Trap (A):** if a build you already handed out can destroy player data, the recall line belongs
+  in the document the next session reads first — not only beside the artifact. Its audience is
+  whoever next decides which file to give someone.
 
 ### Chapter 19 — Publish audit
 
@@ -335,15 +397,61 @@ Skip all three if §4 of the router found no server-only strings.
 
 ---
 
+---
+
+## Phase VIII — the loop a live port runs in (20)
+
+### Chapter 20 — The play-feedback loop
+
+- **Owner:** `port-triage` for the first two steps; then whichever skill owns the finding.
+- **Entry:** a build is in someone's hands.
+- **Why it is a chapter:** chapters 0–19 are a first pass that happens once. **(B)** The reference
+  port ran roughly forty-five further sessions and they were **almost entirely this loop** — ship,
+  receive a report, find the cause, re-enter, ship. Documenting the pipeline without it describes
+  the smallest part of the work.
+
+**20.1 Entry: a report from a player, on a device you do not have.** It is prose, not a stack trace,
+and it is honest. It is also missing the one fact you need most.
+
+**20.2 Step 1 is always: identify the build installed on the REPORTING device.** Not the build you
+last made — the one they are running. Ask the app to report its own build id, or read it from the
+installed package. **(A) Do this before reading any code**, because every hour spent investigating
+source that already contains the fix is invisible from the inside: the code is right, the logs are
+real, and the report keeps arriving. **(B)** Two separate half-days went exactly that way, one build
+apart. `${CLAUDE_PLUGIN_ROOT}/shared/device-verification.md`.
+
+**20.3 Step 2: match the report to a session record, and to what that build did NOT verify.** A port
+needs one artefact for this: a per-build note saying what changed and **what remains unverified on a
+device**. "Unverified on device" is a *state a build is in*, not an omission — write it down and
+keep it open until a human plays it.
+
+**20.4 Step 3: re-enter at the right chapter.** Almost always one of three: **9** (a new offset or a
+misread field), **13** (a patch or a host→guest call), or **2** (the archive on *this* machine is
+stale). Save loss re-enters at **11a**, ahead of everything else.
+
+**20.5 Exit:** the shipped build is recorded with its id, its changes, its open verification item —
+and, if it can destroy data, a recall line in the document the next session reads first
+([port-shipping/reference/distribution-and-recall.md](../../port-shipping/reference/distribution-and-recall.md)).
+
+- **Trap (A):** a report that cannot be reproduced is not evidence of a wrong report. Check the
+  build, then the device, then the premise of your own test suite — **(B)** a green selftest that
+  encoded the bug guarded a real user-visible defect for two releases
+  (`${CLAUDE_PLUGIN_ROOT}/shared/investigation-discipline.md` §9).
+
+---
+
 ## Re-entry points
 
 The pipeline is a first pass, not a life cycle. Once a port is alive, work loops:
 
 | loop | why it loops |
 |---|---|
+| **18 → report → 9 / 13 / 2 → 18** | **The dominant loop of a live port**, and chapter 20 is its procedure. Its first step — identify the build on the *reporting* device — is the step that goes wrong. |
 | **7 ↔ 9 ↔ 13** | Each new guest-side feature needs a new offset (9), sometimes a new constant in the address model (7), then a patch or call proved on device (13). Re-enter at 9. |
 | **12 ↔ 14** | Every new host-drawn widget is placed (12) and then differentially verified against the guest (14). |
-| **2** | Repacking in-jar text or tables, months later, in isolation. Nothing else re-enters with it. |
+| **11a** | Any new save, backup or restore feature; any new screen that can save; any guest finding that touches the slot index. Save integrity is never "done". |
+| **2**, trigger 1 | Repacking in-jar text or tables, months later, in isolation. Nothing else re-enters with it. |
+| **2**, trigger 2 | **This machine's generated archive has fallen behind the repository.** A different event with a different first command: the archive is gitignored, so a session run on another checkout leaves only source, docs and a version bump — the asset work does not travel. The first command is every generator's `--check`, not an edit. |
 | **16 ↔ 17** | Black-box protocol learning: edit a reply, watch the live client, encode the finding as a conformance assertion. |
 | **5 → 6** | A newly reached area exercises an API slot nobody hit before. |
 
@@ -358,16 +466,41 @@ one that does not.
 | 7 | Mostly void. There is no image base, no BSS-in-a-filename, no RWPI static base and no relocation delta. Record the class path and the entry MIDlet instead. |
 | 8 | Same questions, different tool: string constants live in the constant pool. |
 | 9 | Field identity is a name, not an offset — much easier. Keep the two-derivation rule for *semantics*. |
+| 11a | Unchanged. The record store is the *emulator's*, not the guest's, so every loss mechanism and every guard applies identically. |
 | 13 | Patching is bytecode or method interception, not Thumb halfwords. The idempotence and read-verify rules still apply. |
-| 14–19 | Unchanged. |
+| 14–20 | Unchanged. |
 
-## What changes for an offline title
+## Three shapes of network title, and what each one costs
 
-Chapters 15–17 vanish. So do: the socket layer, TLS and pinning, the account store, the transfer
-code, and the entire threat-model section of the publish audit. Chapter 18's config-baking check
-still applies to whatever else you bake in.
+The old form of this section had two columns — "online" and "offline" — and the middle case is the
+one most single-player titles with online conveniences actually land in.
 
-## The five gates you must not skip
+| | **no socket** | **socket, in-process engine** | **socket, hosted server** |
+|---|---|---|---|
+| chapters 15–16 | skip | **apply in full** | apply in full |
+| chapter 17 | skip | deployment half skipped; the conformance suite stays | apply in full |
+| socket layer | — | **stays** — the engine lives inside it as a third connection state, reusing the same poll throttle, resume probe and watchdog | stays |
+| TLS, certificate pinning | — | vanish | apply |
+| account store, transfer code | — | vanish | apply |
+| threat-model section of the audit (ch. 19) | vanishes | vanishes | applies |
+| config baking (ch. 18) | applies to whatever else you bake | applies | applies |
+
+**(A) What the middle column ADDS, which is not obvious from either of the others:**
+
+- **a mode switch and a stated cost for its default** — whichever way it defaults, some players'
+  existing state is invisible in the other mode, and that has to be said out loud in the UI;
+- **a persistent local store** with tolerant parsing and **load-time normalisation**, so an older
+  file shape degrades instead of failing;
+- **a generated shared table with a staleness check**, when host and server must agree on the same
+  catalogue (see the `--check` rule in
+  [archive-prep/reference/generated-assets.md](../../archive-prep/reference/generated-assets.md));
+- **offline-only guest patches** for the strings and timers that only made sense with an operator —
+  a connection notice, an idle-disconnect constant;
+- **a host-side dismissal of the frame that finalises the login**, because nothing else will send it.
+
+All of it: [server-revival/reference/in-process-engine.md](../../server-revival/reference/in-process-engine.md).
+
+## The seven gates you must not skip
 
 1. **Chapter 4** — a frame that reports non-black. Everything after it is guesswork otherwise.
 2. **Chapter 7** — a corpus-validated relocation delta. Five agreeing hand-picked strings is a
@@ -375,3 +508,14 @@ still applies to whatever else you bake in.
 3. **Chapter 9** — two independent derivations per offset, before any code depends on it.
 4. **Chapter 14** — zero mismatched pixels, from a diff of the code that actually ships.
 5. **Chapter 19** — the audit across all refs, before the first push to a public remote.
+6. **Generated-artifact staleness** — every generator's `--check` clean, as the **first command of
+   any session that touches the archive** and again as the build's stage 0. It is the only gate that
+   sees a member which is present, correct-looking and out of date; nothing downstream can.
+7. **Device verification of the shipped build** — open until a human has played *that build*. It is
+   a gate CI structurally cannot run, so it is tracked as an explicit per-build state rather than
+   assumed by a green pipeline (chapter 20).
+
+If the title has an online component, add an eighth: **no host-chosen quantity ships without an
+executable model of the client's own apply procedure** — the client, not your intuition, decides
+what happens to the number you send
+([server-revival/reference/client-fidelity.md](../../server-revival/reference/client-fidelity.md)).

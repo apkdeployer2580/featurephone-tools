@@ -1,0 +1,75 @@
+{
+  "skill": "save-integrity",
+  "evals": [
+    {
+      "prompt": "one of my testers says his character is just gone, the slot shows as empty now",
+      "expect": "trigger",
+      "why": "The canonical entry. The whole skill hangs off the theorem that a guest record store cannot express 'corrupt', so an empty slot is a deletion event and the investigation belongs in the write/delete path. A porter without this skill goes looking for a serialiser bug, which is the one place the bug is never in."
+    },
+    {
+      "prompt": "after I go into the online menu and come back, saving silently stops working for the rest of the session",
+      "expect": "trigger",
+      "why": "This is the shipped refutation of 'refusing is safe': a slot guard that only refuses converts one bug into a worse one, and the guest ignores the write's failure code so the game still says it saved. The symptom names no save file at all, so nothing else in the plugin would claim it."
+    },
+    {
+      "prompt": "slot 1's character showed up in slot 2 and now the original is overwritten",
+      "expect": "trigger",
+      "why": "The slot-identity problem stated as a symptom. The slot index in the record name is a UI cursor, and this is exactly what a drifted cursor plus an unpinned write produces. guest-re could plausibly claim it because a guest word is involved, but the question is a policy question, not an RE question."
+    },
+    {
+      "prompt": "is fs::write good enough for writing a save record or do I need something fancier",
+      "expect": "trigger",
+      "why": "Looks like a generic Rust I/O question and is not: open(O_TRUNC)+write leaves the record at zero bytes for the width of one syscall, and a zero-byte record is precisely what the guest reads as 'no character'. android-host's storage chapter teaches synchronous writes, which is necessary and not sufficient; this skill owns the sufficiency."
+    },
+    {
+      "prompt": "where should I put the backup copies of save files so a player can get them off the phone",
+      "expect": "trigger",
+      "why": "The vault's retention and export design. Export matters because on a release build app-private storage is unreachable over the debug bridge, so a player-triggered export is the only channel — a constraint that only shows up once you are shipping, which is why porters discover it too late."
+    },
+    {
+      "prompt": "how do I know which save slot an incoming record write actually belongs to",
+      "expect": "trigger",
+      "why": "The skill's hardest question, asked directly. The answer is a pin established from an observed load, and the file preserves five shipped attempts. A reader who gets a plausible-sounding answer from general reasoning here will ship one of the four wrong ones."
+    },
+    {
+      "prompt": "my reset-save menu item wipes the whole database directory, is that a problem",
+      "expect": "trigger",
+      "why": "Mechanism E: a whole-directory delete bypasses a guard hooked on per-record set/delete, so the one irreversible action in the game is the one action with no archive behind it. The porter is asking about a feature; the skill answers about an audit of every deletion path."
+    },
+    {
+      "prompt": "we shipped a build that can eat saves, what do we do about the versions already out there",
+      "expect": "trigger",
+      "why": "Recall discipline. port-shipping owns building and distributing, but the decision that a defect is save-destroying — and the rule that you must never resolve it by telling players to uninstall, which deletes the evidence and the vault along with the character — is this skill's."
+    },
+    {
+      "prompt": "the save record is encrypted and I want to parse its fields to show a summary in my launcher",
+      "expect": "no-trigger",
+      "why": "guest-re. Understanding the record FORMAT, and the standing advice to drive the game's own read path rather than reimplement its cipher, is a guest-RE question. This skill never parses a record; it treats saves as opaque bytes on purpose, which is what makes its restore work with no key."
+    },
+    {
+      "prompt": "where do I store the user's control layout and volume preference on android",
+      "expect": "no-trigger",
+      "why": "android-host. Ordinary app configuration is layered, replaceable and losable without harm. Sharing a storage directory with saves does not make it this skill's problem, and pulling routine config questions in here would drown the one subject that must not be diluted."
+    },
+    {
+      "prompt": "MC_dbOpenDataBase mode 4 is unimplemented in my fork, how do I implement the record store API",
+      "expect": "no-trigger",
+      "why": "emulator-core. Implementing the platform storage surface is a WIPI-C recipe. The boundary is real but thin: this skill owns what mode 4 must NOT do (truncate up front), and says so, but a porter writing the API from scratch needs the recipes file first."
+    },
+    {
+      "prompt": "the game says saving failed and I want to know why the write returned an error",
+      "expect": "no-trigger",
+      "why": "Ambiguous by design, and it resolves away. A write that correctly reports a failure is working as this skill demands; the question is now about the underlying I/O or capacity error, which belongs to whichever layer produced it. The skill's concern is that the failure is propagated and does not become a delete — if the reporter says the record vanished, it flips to trigger."
+    },
+    {
+      "prompt": "my server's account table keeps a copy of each player's save, should I add an index on it",
+      "expect": "no-trigger",
+      "why": "server-revival. Server-side schema and performance are its business. The one adjacent claim this skill makes — that a single mutable cell per account and slot is not a backup — is a design refutation stated in the vault chapter, not a reason to capture database questions."
+    },
+    {
+      "prompt": "my app got killed by the OS and I want to understand the tombstone",
+      "expect": "no-trigger",
+      "why": "port-shipping crash triage and emulator-core memory footprint. Process death is only this skill's business through its consequence — a kill landing inside an open truncate window — and that consequence is documented as a mechanism, reached from the save symptom rather than from the crash."
+    }
+  ]
+}

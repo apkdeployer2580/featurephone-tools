@@ -15,11 +15,14 @@ debugging "the protocol" while the bug is in your socket layer.
 - [The seven host rules](#the-seven-host-rules)
 - [Connect budget vs the guest's own patience](#connect-budget-vs-the-guests-own-patience)
 - [`poll_readable`: the three verdicts, and the one that freezes the app](#poll_readable-the-three-verdicts)
+- [★ The eighth failure: the platform destroys backgrounded sockets](#-the-eighth-failure-the-platform-destroys-backgrounded-sockets)
+- [★ Only the client's own modal changes the client's screen](#-only-the-clients-own-modal-changes-the-clients-screen)
 - [Runtime-configurable destination, from day one](#runtime-configurable-destination-from-day-one)
 - [Parsing an endpoint line](#parsing-an-endpoint-line)
 - [TLS as a socket-layer wrapper](#tls-as-a-socket-layer-wrapper)
 - [Rewriting outgoing frames: identity injection](#rewriting-outgoing-frames-identity-injection)
 - [A second, host-owned connection](#a-second-host-owned-connection)
+- [The local transport arm: a connection with no network under it](#the-local-transport-arm-a-connection-with-no-network-under-it)
 - [Logging discipline](#logging-discipline)
 - [The silent baseline](#the-silent-baseline)
 - [Failure table](#failure-table)
@@ -152,6 +155,91 @@ therefore the first bug every remote player hits and the last one you will repro
 deliberately: connect, then `iptables -j REJECT --reject-with tcp-reset` the server, or kill the
 server process with the connection open from a different network.
 
+## ★ The eighth failure: the platform destroys backgrounded sockets
+
+Every failure above originates in the **network**. There is one more that does not, and no
+combination of the seven host rules prevents it.
+
+**(A) A modern mobile OS destroys a cached app's sockets.** Once the process is backgrounded long
+enough to be cached, the platform's freezer tears the connections down and the next syscall reports
+a **connection-abort** error. Nothing was wrong with the network, nothing was wrong with your
+server, and there is no reproduction on a desk over `adb reverse` because the app is never cached
+while you are looking at it. Confidence `HIGH / CONFIRMED`: device logcat showing the platform's
+abort error code and the guest then running its own teardown.
+
+**The only real cure is a persistent-notification foreground service**, which many projects will
+refuse on principle — the reference port did, and that decision is what makes the rest of
+this section necessary. If your project declines it too, write the decision down so it is not
+re-proposed every time the symptom is reported.
+
+### The two-stage defence, plus a backstop
+
+1. **Record the transition on the way DOWN, not on resume.** A flag set in the pause callback names
+   exactly the sockets that were alive across the background. Set it on *resume* instead and you also
+   mark every socket opened *after* the resume as suspect, and start closing healthy connections.
+2. **On the first network call after resume, probe each live socket and *ask* it.** Do not assume
+   death: a short background very often survives, and closing a working connection costs the player
+   their screen. A zero-length read or a peer-state query is enough. **(B)** the reference port
+   measured detection at **39 ms** after resume — cheap enough to sit on the first call.
+3. **Keep an unanswered-request watchdog as the backstop**, for the cases where the socket is neither
+   readable nor detectably dead.
+
+### ★ The watchdog keys on an unanswered REQUEST, never on silence
+
+**(A)** The obvious watchdog — "no bytes received for N seconds ⇒ the connection is dead" — is wrong
+for this protocol shape, and it fails in the most damaging possible direction: **it disconnects
+healthy players in the middle of ordinary play.** A healthy idle client sends only heartbeats, and a
+correctly built server *deliberately does not answer them*
+([server-architecture.md](server-architecture.md)), so a silence timer fires on perfectly good
+connections.
+
+Four rules:
+
+* **Arm only on a non-heartbeat request.** The heartbeat is not a question, so it cannot go
+  unanswered.
+* **Disarm on any inbound byte.**
+* **Track only the OLDEST unanswered request.** Re-arming per request lets a burst push the deadline
+  back indefinitely, and the stuck one is always the first.
+* **Make the watchdog answer the readability poll too**, or it only ever fires for a guest that spins
+  on `recv` by itself, which is not the guest you are trying to rescue.
+
+### What this is *not*
+
+**Raising the server's idle budget does not fix it.** The platform resets the connection within
+seconds — far inside any sane budget — so a budget change cannot be the cure, however plausible the
+timing looks. That misattribution actually happened in the reference port; the budget change was
+kept and **relabelled as hygiene**, paired with keep-alive. See
+[server-architecture.md](server-architecture.md)'s idle-timeout row, and
+[black-box-loop.md](black-box-loop.md) on labelling what survives a refuted diagnosis.
+
+And detecting the dead socket is only half the repair: the client is sitting on a screen that will
+not clear by itself. That is the next section.
+
+## ★ Only the client's own modal changes the client's screen
+
+The socket layer is where you are standing when this problem arrives, and it is the one layer that
+**cannot** solve it.
+
+> **REFUTED.** *Previously believed:* a client stuck on its loading modal can be released from the
+> socket layer — close the connection under it, and the client will notice and leave the screen.
+> Failing that, feed it a synthetic reply.
+> **Refuted by:** device runs establishing three constraints. The guest ran its **complete** network
+> teardown and *still* displayed the loading modal. Which reply opens a message box is **screen
+> dependent**, so the same synthetic frame works on one online screen and does nothing on another.
+> And closing that message box does not leave the screen either.
+> **Why it was attractive:** the teardown genuinely does run, so it looks as though the client has
+> already accepted the disconnect and needs only a nudge — and the synthetic frame *does* visibly do
+> something on the first screen you try it on.
+> **Consequence if carried forward:** you spend the investigation in the transport, where the answer
+> is not; and the synthetic frame is worse than useless, because its handler opens a *different*
+> modal that overwrites the one escape hatch that would have worked.
+
+**(A) The answer is the game's own modal**: find the modal id whose key handler already performs
+**both** the teardown and the screen transition, and write exactly the words the game's own show-modal
+routine writes — **state word last**, gated on the screen family that owns the dispatch tables. The
+discovery route is in [reply-re.md](reply-re.md) ("the stuck-screen escape"); the consequences for
+refusals and holds are [refusals-and-holds.md](refusals-and-holds.md) §12.
+
 ## Runtime-configurable destination, from day one
 
 **(A)** A compile-time constant destination is what later turns into "it only works on my desk".
@@ -260,6 +348,22 @@ is blocking, on its own thread, and never touches the guest's socket state.
 This is one of the most valuable patterns in the chapter: once you can synthesize the client's
 frames, the host is a first-class protocol participant.
 
+## The local transport arm: a connection with no network under it
+
+**(A)** The same file that owns `connect`/`send`/`recv`/`close` is also the right place to host a
+connection with **no socket beneath it at all**: `connect` constructs an in-process protocol engine,
+`send` feeds it request bytes, `recv` drains the replies it produced. The guest's slots are
+untouched and every rule above still holds — the rest of the socket layer simply sees an fd that
+never fails. That is the whole wiring cost of retiring the server, and it is why this belongs in the
+socket layer rather than beside the protocol code. Full treatment, including the mode switch and the
+local store: [in-process-engine.md](in-process-engine.md).
+
+**★ One socket-layer rule transfers and is easy to lose: the local arm must share the receive-poll
+rate gate.** The guest's wait loop polls `recv` tens of thousands of times a second, and a local path
+that skips the gate the socket path uses turns a smooth screen into a stuttering one. It is safe to
+gate, because an engine produces its reply synchronously inside `send`: a reply that exists is
+already queued, so the gate delays nothing that was going to arrive sooner.
+
 ## Logging discipline
 
 **Log the header, never the payload.** The payload carries the account credential and save blobs,
@@ -301,3 +405,8 @@ it is the single most common way to burn a week attributing coincidences.
 | connect works on IP, times out on a hostname | DNS is inside the budget, and per-address timeouts multiply |
 | works on your desk, nowhere else | destination is a compile-time constant, or gated on `debug_assertions` |
 | TLS build fails in CI cross-compile | crypto backend wants `cmake`/`nasm`; switch backends |
+| frozen on a network screen after a background/resume, no network fault, no LAN repro | the platform destroyed the socket while the app was cached; probe on the first call after resume |
+| your own watchdog disconnects players mid-play | it keyed on received silence; a healthy idle client sends only unanswered heartbeats |
+| the watchdog never fires for a hung client | it does not answer the readability poll, so only a `recv`-spinning guest reaches it |
+| the screen will not change however you reply, or whether you close the socket | only the client's own modal moves the client's screen |
+| page turns stutter after the protocol moves in-process | the local transport arm skipped the receive-poll rate gate |

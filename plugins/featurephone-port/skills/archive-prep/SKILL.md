@@ -1,6 +1,6 @@
 ---
 name: archive-prep
-description: Prepares a carrier download package or a bare .jar so a wie-family emulator will boot it — detects the platform from the magic entry (__adf__ for KTF, app_info for LGT, *.msd for SKT, a MIDlet manifest for J2ME), repairs CRLF line endings in the app descriptor, reconciles the AID against the jar basename and the client.bin<bss> native member, strips the previous owner's private save entries, and surgically repacks in-jar data files without disturbing any other member. Use when a game archive will not load or boots to a black screen; when the loader reports "Unknown archive format" or "not a KTF archive"; on a NotFound panic in java/io/file.rs, on "Main class not found", or on "Invalid bss_size in filename"; when asked to classify, prepare, repair, unpack, repack, strip or verify a game .zip/.jar/.jad/.kdp; or when in-jar item text, tables or other data members must be rewritten.
+description: Prepares a carrier download package or a bare .jar so a wie-family emulator will boot it — detects the platform from the magic entry (__adf__ for KTF, app_info for LGT, *.msd for SKT, a MIDlet manifest for J2ME), repairs CRLF line endings in the app descriptor, reconciles the AID against the jar basename and the client.bin<bss> native member, strips the previous owner's private save entries, and repacks in-jar data files without disturbing any other member. Use when a game archive will not load or boots to a black screen; when the loader reports "Unknown archive format" or "not a KTF archive"; on a NotFound panic in java/io/file.rs, on "Main class not found" or "Invalid bss_size in filename"; when asked to classify, prepare, repair, unpack, repack, strip or verify a game .zip/.jar/.jad/.kdp; when in-jar item text, tables or data members must be rewritten; or when a generated archive member may be stale — an edit missing from this checkout, or a game dying after the title screen.
 license: MIT
 ---
 
@@ -72,9 +72,13 @@ Success = `[probe] loaded`, then a periodic work gauge, then a dumped frame with
 
 Add `--db work/db` to exercise the save path against a real on-disk database.
 
+★ Booting proves the archive **loads**; it says nothing about whether its members are **current**. A generated member that disagrees with a guest constant boots fine and kills the game a few hundred frames after the title (F11) — that needs the `--check` gate above and a long soak run, not a smoke test.
+
 ## Optional — repack in-jar data
 
 Only when text or tables that are **not** in the guest binary must change. Two rules: rebuild entry-by-entry preserving `compress_type`/`date_time`/attrs, and verify by re-parse plus member-wise byte compare — never by size.
+
+★ **The first command of any session that touches assets is every generator's `--check`**, not an edit. The archive is gitignored, so it does not travel with a commit, and a second tool that rebuilds from pristine silently discards the first one's members. Both failures are invisible: every tool reports success. `--check` rebuilds in memory and byte-compares against the archive that ships, exiting non-zero. Ownership, tool order and the canary member: [reference/generated-assets.md](reference/generated-assets.md).
 
 ```
 python "${CLAUDE_PLUGIN_ROOT}/tools/repack_member.py" work/<archive>.zip \
@@ -90,6 +94,7 @@ Mechanics and pitfalls: [reference/repacking.md](reference/repacking.md). Decidi
 | [reference/archive-anatomy.md](reference/archive-anatomy.md) | classifying, or you need to know what reads what at boot |
 | [reference/fault-dictionary.md](reference/fault-dictionary.md) | anything failed — match the exact panic text |
 | [reference/repacking.md](reference/repacking.md) | rewriting any member of the zip or the jar |
+| [reference/generated-assets.md](reference/generated-assets.md) | more than one tool writes the archive; a member may be stale; before shipping |
 | [reference/record-formats.md](reference/record-formats.md) | deciding if a data file tolerates a length change |
 | [reference/minimal-archive.md](reference/minimal-archive.md) | descriptor missing, or bisecting a broken archive |
 

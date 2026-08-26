@@ -94,6 +94,19 @@ If a target fails the check, **look one level down**. The arm is usually a thin 
 
 Also worth checking: whether the function is small enough to just **read** rather than call. A "can I do X?" predicate that is nothing but `return (s8)*(GOD+0xa280);` should be a memory read, not a queued call. One read cannot fail, cannot time out, and cannot re-enter.
 
+### Cheapest of all: write the state the handler reads, and synthesise its trigger **(A)**
+
+Before hunting a handler's address at all, ask whether the same effect is available with **no guest address whatsoever**: write the byte the game's own key router reads — a cursor, a highlighted row, a page index — and synthesise the ordinary keypress a player's thumb would produce. The game's dispatcher then does the whole job on its own stack, and your commit path carries **no address that can go stale**.
+
+Reference case **(B)**: build 1's commit called the game's own popup key handler directly. Build 2 needed no guest function at all. Two deterministic probe runs, identical except that one poked the highlighted-row byte ten frames before an ordinary OK, showed the dispatcher reading that byte on key arrival and performing the entire operation itself, cleanup of the previous binding included. A plan document had twice asserted "the one remaining unknown is this handler's address"; both assertions were wrong. `HIGH / CONFIRMED`.
+
+**⚠ But synthesising a keypress is *not* equivalent to calling the handler.** The key is delivered **a tick later**, and the game's own clamps and routers run in the gap. Two consequences, both measured **(B)**:
+
+* **Restore anything you temporarily shrank before the key lands.** One implementation reduced a row-count byte to 4 while the row to be committed could be 5, and the guest's own cursor clamp pulled the row number back down inside that window. The commit path now restores the native count immediately before the key arrives — a hazard the direct-call build structurally does not have.
+* **A host guard that duplicates a router check is needed only on the build that bypasses the router.** Carried across to the build that goes *through* the router, the same guard read unrelated live fields and refused every popup of one kind. Diagnostic worth keeping: when two paths share one machine and only one fails, the difference is in the **path-specific gate**, not in the machine.
+
+The touch side of this — one tap focuses, a second tap activates, and never cache the cursor byte you are about to write — is [touch-driven-guest-ui.md](../../android-host/reference/touch-driven-guest-ui.md).
+
 ---
 
 ## 5. Rule 3 — a chain of calls is a polled state machine
@@ -132,7 +145,28 @@ pub fn advance(&mut self, result: Option<CallOutcome>, scratch: u32) -> Next
 
 Note step 2. **Validation between steps is a step.** Passing an implausible pointer or a nonsense length into the writer is how you corrupt a save file with the game's own code.
 
-Read the record-name pointers out of the guest's **own** static slots rather than hardcoding strings — the game appends a slot suffix to them, and its convention is not yours to invent.
+**Never invent the record-naming convention — take it from the game.** It appends a slot suffix to its own name strings, and a host that guesses the format writes into a namespace the game will never read.
+
+> **REFUTED.** *"Read the record-name pointers out of the guest's **own** static slots rather than hardcoding strings."*
+>
+> **Refuted by:** the second build of the same game, where there are no static slots to read. That build is a linked ELF: its name strings are compiled into `.text` and reached by absolute literals ([address-model.md](address-model.md) §9.1), so the instruction above is not differently-parameterised, it is **unimplementable**. `HIGH / CONFIRMED` — the corrected chain was then proven end to end by the game loading a record the host had written.
+>
+> **Why the wrong reading was attractive:** on an RWPI build the slot table really is the right source, and reading it really is better than hardcoding a string — the *intent* survives untouched. What does not survive is the unstated assumption that "the guest's own copy of a pointer" is something every build has.
+>
+> **Consequence if carried forward:** a port to a second build stalls looking for a slot table that does not exist — or, worse, adopts some other plausible static word as "the name pointer" and writes the save into a namespace nothing reads.
+
+**The build-keyed form (A).** Make the *source* of the names an enum with one arm per addressing model, and put the reason on each arm:
+
+```rust
+enum SaveNames {
+    /// RWPI build: the static slots hold POINTERS to the strings — read them at runtime.
+    SlPtrs { game: u32, slot: u32 },
+    /// Linked-ELF build: the strings are compiled in — pass their addresses straight through.
+    Direct { game: u32, slot: u32 },
+}
+```
+
+**Key the pointer-plausibility window the same way.** The `plausible_ptr` guard that decides "could this word be a guest pointer at all" is **per build**: one build's image starts near `0x100000`, the other's `.text` starts at `0x1000`. A window written for the first silently refuses every valid pointer on the second, and a refusal reads exactly like "the feature is not available here". Open it at the **lowest mapped guest page of the build that actually booted** — [build-keyed-anchors.md](build-keyed-anchors.md).
 
 ---
 
@@ -157,6 +191,13 @@ struct JvmThreadGuard(Option<Jvm>);
 ```
 
 **(A) Generalise:** any host→guest call path in a hybrid runtime needs this. **Check it before shipping the first such feature**, and check it *on a device* — this is precisely the class of bug a headless run does not reproduce.
+
+**⚠ "This carrier does not need the guard" is a claim about *paths*, not about a carrier.** The second carrier's runtime crate carried an explicit comment saying the attach was unnecessary **there** ("no ARM-side AOT Java on this path"). That comment was true of most paths and **false of the record-database path** — and the first host-originated save on that build panicked in exactly the same `threads.get(&id).unwrap()`. The guard had to be ported into the vendored crate before an end-to-end save worked. **(B)** `HIGH / CONFIRMED` (panic reproduced, then fixed, then a save the game loaded).
+
+Two rules fall out **(A)**:
+
+* Re-test the claim **per subsystem**, and start with the **record/database path** — that is the one that falsifies it.
+* Wrap `call_guest_function` *and* its out-param variant. Wrapping one is the shape of this bug the second time you meet it.
 
 ---
 
@@ -211,7 +252,9 @@ Some hazards cannot be removed, only bounded. Write them down rather than discov
 
 **Leaks.** The game's own primitives allocate (serialise twice, summary once, writer `len + 0x10`) and **nothing frees** — the original only saved on demand, so it never mattered. Driving them on a timer changes that. Reference accounting **(B)**: ~2.9 KB per save, so a 5-minute autosave cadence costs ~175 KB over a five-hour session. **Mitigation is cadence, and the arithmetic belongs in the comment next to the interval constant.**
 
-**Allocator assumptions.** Holding a guest pointer across ticks is sound only because the allocator is malloc/free with no compaction. Verify this on your platform before choosing a chained design.
+**Allocator assumptions — and the separate question of identity.** Holding a guest pointer across ticks is sound only because the allocator is malloc/free with no compaction. Verify that on your platform before choosing a chained design.
+
+⚠ **That is a statement about the address, not about the object at it.** The *game* may compact its own containers in place — swapping whole record contents between cells — so the address stays valid while the object living there becomes a **different one**. "Can I hold this **address** across ticks?" and "can I hold this **identity** across ticks?" are different questions with different answers, and any deferred call or write that names an object by container coordinate needs an **instance-key re-match at the moment of use**, whatever the allocator does. In the reference port the compactor's wrapper is reached from seventeen call sites — including the item popup's own close path, which is the keystroke that commits the host mutation. `HIGH / CONFIRMED`. The procedure is [live-data-structures.md](live-data-structures.md) §4-§5.
 
 **State the limits of what you drove.** If a network-delivered reward goes through a different code path than the one you patched, or an effect only applies at equip time so expiry cannot revert it, that is user-facing behaviour. Put it in the feature description, not in a future bug report.
 
@@ -222,11 +265,14 @@ Some hazards cannot be removed, only bounded. Write them down rather than discov
 Before the first host-originated guest call ships:
 
 - [ ] Thumb bit ORed in one place, asserted by a test.
+- [ ] You checked whether the feature needs a call at all — a memory read, or writing the state and synthesising the key, beats a call (§4).
 - [ ] Every target passed the callability check (own prologue, own epilogue, own `sl` setup).
 - [ ] Anything that is just a memory read is a memory read, not a call.
 - [ ] Result cell is three-state; `Acquire`/`Release` paired.
 - [ ] The chain is a pure `advance()` state machine, selftested via `include!` of the real source.
-- [ ] JVM thread attach is RAII, tolerates a missing JVM, and **has been verified on a device**.
+- [ ] JVM thread attach is RAII, tolerates a missing JVM, wraps **both** call entry points, and **has been verified on a device — on each carrier, on the record path** (§6).
+- [ ] Anything named by container coordinate is re-matched by instance key at the moment of use (§10).
+- [ ] Record names come from the game, by the route that exists **on this build** (§5).
 - [ ] Per-step timeout with a named regression test; every timer sentinel has a boundary test.
 - [ ] The gate reads the game's own precondition, clause by clause, with provenance comments.
 - [ ] The UI control is reachable in a state that passes the gate.

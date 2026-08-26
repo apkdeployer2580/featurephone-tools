@@ -47,7 +47,17 @@ Reference **(B)**: `*(sl+0x138)` and `*(sl+0x13c)` hold the two record-name stri
 
 Reference **(B)**: `writeDbRecord(name, ptr, len)` at `0x1951b0`. It appends `"_%d"` from a slot index held in the god object, then calls a helper that does `alloc(len + 0x10)` and encrypts.
 
-**4. Cross-check the sizes arithmetically. This is the strongest single piece of evidence in the recipe.**
+**4. Ask who owns that slot index. This is the most damaging question in the whole area, and the recipe used to stop one step short of it.**
+
+The writer takes no slot argument — it reads a word out of the god object. So enumerate **every writer of that word** (`xref.py offset <imm>`, both idioms) and read each one.
+
+Reference finding **(B)**: every writer was in **menu and shell screens** — the title screen, the two slot-list screens' up/down handlers, one modal. None of them was the load path or the save path, and **the game never unloads the character**. The word is therefore a **slot-list cursor**, not "the slot this character came from": walking a slot list re-aims every subsequent save at another character's record, and the game's own online/container screens then save constantly. `HIGH / CONFIRMED`.
+
+**The test (A):** if every writer of the slot word is UI code and none of them is the load or the save path, **you have this bug**. The fix belongs in the **host's storage layer**, not in the guest — do not "correct" the guest's cursor, because the slot screens read it and would break. Redirect or refuse at the point where a record reaches disk.
+
+That subject is large enough to be its own skill: [save-integrity](../../save-integrity/SKILL.md), and for this question specifically [slot-identity.md](../../save-integrity/reference/slot-identity.md).
+
+**5. Cross-check the sizes arithmetically. This is the strongest single piece of evidence in the recipe.**
 
 `alloc(len + 0x10)` predicts `on_disk = payload + 16`.
 
@@ -58,10 +68,10 @@ Reference **(B)**: `writeDbRecord(name, ptr, len)` at `0x1951b0`. It appends `"_
 
 **A size relation that closes is worth more than any amount of disassembly reading.** It confirms the writer, the header size and both payload sizes at once, and it is impossible to fool yourself with.
 
-**5. Confirm the argument order by consensus of independent call sites.**
+**6. Confirm the argument order by consensus of independent call sites.**
 Two unrelated callers producing the same `(name, ptr, len)` shape is a consensus. Better still if one of them is a call whose length you can predict — a 16-byte summary written to the 32-byte record checks out against step 4.
 
-**6. The buffer's producer is the call immediately before the writer.**
+**7. The buffer's producer is the call immediately before the writer.**
 
 Reference **(B)**: `serializeSave(u32* outLen) -> buf` at `0x1960bc`. Read the out-param convention off the *caller's* prologue:
 
@@ -74,11 +84,16 @@ mov  r0, sp        ; r0 = &outLen
 
 That tells you the host must supply a writable 4-byte address — see [patching.md](patching.md) §5 for where to get one without allocating.
 
-**7. Find the precondition from the refusal message** (Recipe B). Games refuse to save in towns, in combat, during cutscenes.
+**8. Find the precondition from the refusal message** (Recipe B). Games refuse to save in towns, in combat, during cutscenes.
 
 Reference **(B)**: `canSave()` at `0x192bd0` turns out to be nothing but a load of `(s8)*(GOD+0xa280)`. **Read the byte directly rather than calling the function** — one guest read instead of a queued call, and it cannot fail.
 
-**8. Expect encryption, and route around it.** If the records are high-entropy, you cannot parse or synthesise them offline. Everything the host wants from a save (a backup blob, a summary, a slot listing) must come from calling the game's own read path, not from parsing the file.
+**9. Expect encryption, and route around it.** If the records are high-entropy, you cannot parse or synthesise them offline. Everything the host wants from a save (a backup blob, a summary, a slot listing) must come from calling the game's own read path, not from parsing the file.
+
+Two consequences that are easy to miss, and both are good news **(A)**:
+
+* **Ciphertext is an *advantage* for a backup vault.** If you cannot read a record you also do not need to: a **byte copy** of the record taken immediately before it is overwritten needs no key, no guest call and no game state, so it works at the title screen and during boot, which is exactly where the guest-call route does not. See [save-vault.md](../../save-integrity/reference/save-vault.md).
+* **The record's LENGTH is then the only readable signal about what it holds.** Name each vault copy `<timestamp>-<length>.bin`, and a jump in length tells you the moment a slot started holding a *different* character. It is a weak signal; on an opaque record it is the only one you have.
 
 ### Refutations to carry
 
@@ -141,6 +156,14 @@ Reference choice **(B)**: rewrite `adds r1, r3, #0` (`0x1C19`) to `subs r1, r3, 
 **9. Bound the patch by its encoding.** Thumb-1 `subs rD, rN, #imm3` has a **3-bit** immediate, so the maximum reduction is 7. The encoding, not the design, sets the feature's limit. Say so in the code: name the constant `RELIEF_LEVELS_MAX = 7` and comment *why*.
 
 **10. Check uniqueness, then state the limits honestly.** Because that level check exists only at equip time, a timed version of the effect cannot un-equip anything when it expires. That is a real behaviour, and it belongs in the user-facing description rather than in a bug report three weeks later.
+
+### The other use of this recipe: transcribing a gate you are *not* patching **(A)**
+
+Most of the time you are not relaxing the gate at all — you are **reimplementing** it, because a host list has to grey out the rows the game refuses, or a replacement server has to reject what the game rejects. Then step 7's table does not apply and one rule replaces it:
+
+> **Transcribe the comparison exactly, including the half that is absent.** Game validators are routinely one-sided (`cmp #N / bgt`, with no test for zero), and "tidying" that into a range silently removes a whole category — usually the zeroth, which is a real and common item.
+
+In the reference port that cost two releases, and the bug was **kept green by its own selftest**, whose negative list had been copied from the wrong implementation rather than derived from the gate. The full treatment — the refutation, the three-implementations rule, and where the rejection has to happen so the player can see it — is [live-data-structures.md](live-data-structures.md) §14.
 
 ---
 
@@ -265,6 +288,8 @@ That dimension agreement is derivation #2. You now have the original art with **
 | a multiplier, a rate change, a tuning knob | C |
 | any field offset at all, before building on it | D — always |
 | host UI that matches the game's look | E |
+| a host or a replacement server that must refuse exactly what the game refuses | B, then transcribe rather than patch |
+| a save that your own storage layer must not destroy | A, then [save-integrity](../../save-integrity/SKILL.md) |
 | an unknown scalar you cannot see in code | [probe-cli.md](probe-cli.md) §8.4, then D |
 | an object whose address you do not know but whose shape you do | [probe-cli.md](probe-cli.md) §8.1 |
 

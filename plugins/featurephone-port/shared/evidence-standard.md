@@ -7,8 +7,8 @@ The short version: **reverse-engineering documentation is wrong on a regular bas
 is determined entirely by how it behaves when it turns out to be wrong.** Notes that record only
 conclusions rot silently — the reader cannot tell a device-confirmed fact from a Tuesday-afternoon
 guess, so either they trust everything (and ship the guesses) or they trust nothing (and re-derive
-the facts). The four practices below cost about one extra line per finding and make the document
-survive being wrong.
+the facts). The practices below cost about one extra line per finding each, and they are what make
+a document survive being wrong.
 
 ## Contents
 
@@ -18,8 +18,15 @@ survive being wrong.
 - [4. Preserved refutation blocks](#4-preserved-refutation-blocks)
 - [5. A measured constant carries its symptom, its measurement and its date](#5-a-measured-constant-carries-its-symptom-its-measurement-and-its-date)
 - [6. Behaviour is settled dynamically, never by reading disassembly](#6-behaviour-is-settled-dynamically-never-by-reading-disassembly)
-- [7. Where evidence lives](#7-where-evidence-lives)
-- [8. Checklist](#8-checklist)
+- [7. What a search result licenses](#7-what-a-search-result-licenses)
+- [8. Where evidence lives](#8-where-evidence-lives)
+- [9. Checklist](#9-checklist)
+
+Two companion files carry the *procedure* that these evidence rules imply, and this file deliberately
+does not repeat them: [investigation-discipline.md](investigation-discipline.md) (how to search, and
+how to be wrong cheaply) and
+[guarding-destructive-operations.md](guarding-destructive-operations.md) (the shape of a guard on an
+operation that can destroy a player's data).
 
 ---
 
@@ -125,6 +132,15 @@ Routes that are genuinely independent of each other:
    disk is exactly `payload + 16`, the relation closing is stronger evidence than any amount of
    reading.
 6. **Differential verification.** Reimplement host-side and diff against the guest's own output.
+7. **Capture a live instance whose values differ.** Two adjacent same-typed fields cannot be told
+   apart by reading code that treats them symmetrically — every read, write and copy in the image
+   handles both identically, so the disassembly is silent on which is which. One real record in
+   which the two happen to hold *different* values decides it in a second.
+   **(B)** Two bytes of a 20-byte record were documented as *total sockets* and *filled sockets* the
+   wrong way round, through a static reading and a reimplementation, until a record captured from a
+   device settled it; the comment recording the swap is still in the reimplementation, which is the
+   correct place for it. Swapped adjacent fields produce behaviour that is *almost* right, which is
+   the hardest kind of wrong to notice.
 
 ### Worked example (B) — the strongest evidence pattern in the reference port
 
@@ -153,6 +169,46 @@ willingness to ask "what should this number be if my reading is right?"
   coincidence explains almost none.
 - "It works." A patch that appears to work confirms that *something* changed, not that your model
   of *why* is right. Ask what your model predicts that a rival model does not, then check that.
+- **A green test that agrees with the code.** If the assertion was written from what the code
+  currently outputs, the test and the code are one derivation, and the test's greenness is now
+  *guarding* whatever the code got wrong. This is not the mirror-drift failure that
+  [selftest-convention.md](selftest-convention.md) warns about — a test that `include!`s the real
+  source cannot drift, and freezes the wrong premise perfectly.
+  **(B)** Three shipped defects in the reference port were each held in place by a passing
+  assertion: a server test named for a field "still being one byte" asserted the exact width that
+  overflowed the client's *signed* read of it; a negative list asserted that a legitimate item
+  category was not equipment, so 23 green assertions proved the bug for two releases and it reached
+  the player as a question about the game's design; and a save-policy test asserted the reported
+  destructive sequence as the expected safe outcome, under a case comment that mis-named it. All
+  three suites were green and believed. The discipline that follows from this — **on a bug report,
+  grep the test suite for the reported input before reading any code** — is owned by
+  [investigation-discipline.md](investigation-discipline.md) §9.
+- **A second person reading the same instruction.** Two competent, independent readings routinely
+  reach *opposite* conclusions, and re-reading does not converge them. See below.
+
+### When two readings disagree, compute
+
+> **(A) Do not weigh the readings. Replace reading with something countable — a computed pointer, an
+> enumeration of that pointer's readers, a size relation that closes.**
+
+Interpretation has no tie-break. Arithmetic does, and it is usually minutes of work.
+
+**(A)** For a disputed load, compute the literal-pool address the instruction actually reads —
+`(pc + 4) & ~3 + imm` for the PC-relative form — read the word that is there, and then enumerate
+every site in the whole image that loads that same word. The count is itself informative: a handful
+of readers is a call graph.
+
+> **(B)** Two investigations of the reference port read one branch as "free the buffer" and as
+> "load the save" respectively — which decided whether the surrounding routine was destructive and
+> therefore whether a save guard was even needed. Computing the literal address and reading the word
+> ended it: the word was a loader entry with the Thumb bit set, and exactly two sites in the image
+> read it. The arithmetic beat both readings.
+
+⚠ A structural companion that makes this the *only* available call graph in some images: where every
+cross-module call is `ldr rN, =target|1` followed by a branch through a one-instruction register
+veneer, a branch-and-link call graph reports zero callers for real functions. That property is a
+per-image fact to establish before trusting any caller count —
+[live-data-structures.md](../skills/guest-re/reference/live-data-structures.md) covers it.
 
 ---
 
@@ -173,17 +229,49 @@ this time ships it.
 **Refuted by:** <what was run, on what, and what it produced>
 **Actual mechanism:** <why the wrong reading was attractive, and what is really happening>
 **Consequence if carried forward:** <what breaks for someone who believes the old claim>
+**Limits of the search that produced this:** <what this investigation could not have caught>
 ```
 
 The third field is not optional. "Why the wrong reading was attractive" is the part that stops the
 loop; without it the block reads as a typo correction rather than as a trap marker.
 
-### Six corrections carried by this plugin
+The fifth field is the one most often skipped and it has the best measured payoff of any line in
+this document. **(B)** One session in the reference port ran three static searches for a flag, got
+zero hits, and wrote down that those searches were literal- and displacement-based and therefore
+could not catch an index computed at runtime. The next session started at exactly that sentence,
+found the runtime-computed index, and closed a bug that had been answered wrongly three times; the
+closing note records the causal link explicitly. See §7.2 and
+[investigation-discipline.md](investigation-discipline.md) §2.
+
+### Two renderings of the same block
+
+The heading form above is for an append-only notes file, where corrections accumulate in date order.
+The reference documents in this plugin compress the same fields into a **blockquote placed next to
+the sentence it corrects**, because there the reader arrives at the wrong belief rather than browsing
+a list:
+
+```markdown
+> **REFUTED.** *"<the refuted claim, in its own words>"*
+>
+> **Refuted by:** … **Why it was attractive:** … **Correction:** …
+> **Limits of the search that produced this:** … *(where the investigation had a known blind spot)*
+```
+
+Both are the same object and neither is optional: the claim must remain visible next to its
+disproof. Do not "clean up" a document by deleting the refuted half.
+
+### Corrections carried by this plugin
 
 These are real refutations from the reference port's own documentation. Each is repeated in the
 skill that owns it. They are listed here because collectively they are the argument for the whole
 practice — every one of them was *written down as fact* by a competent person before it was
-disproved, and four of the six were disproved only by running something.
+disproved, and most were disproved only by running something.
+
+> **The list is a sample, not a census.** An earlier edition of this file said the reference port's
+> documentation "was wrong in six identified places", which reads as a closed set that has been
+> dealt with. It is not: the port has been corrected many more times since, and several of the later
+> corrections are worth more than these because they were *shipped*, damaged a player's data, and
+> were caught by measurement. Never write a count. Point at the practice.
 
 1. **Bundled private-save entries in an archive do not seed a new user's database.** The deploy
    documentation said they did. Measurement showed the game writes its own record: packaged-database
@@ -224,6 +312,42 @@ disproved, and four of the six were disproved only by running something.
    existing frames with no guest changes at all. "The protocol is fixed" is true; "therefore the
    authentication is fixed" does not follow.
    *Owner: `server-revival`.*
+
+7. **A citation is not evidence.** A note claimed a validator accepted an inclusive range and cited
+   three guest sites as proof. Re-disassembling the cited instructions showed all three test only an
+   *upper* bound. By the time anyone checked, the wrong claim had propagated into a constant, a
+   comment, a test's negative list and a shipped release — where it removed an entire legitimate
+   item category from a feature, and the player reported it as a question about the game's design.
+   Re-read cited instructions before building on the claim they are cited for; this is distinct from
+   the rule about re-reading bytes at a patch site, because here nothing was being patched, only
+   believed.
+   *Owner: `guest-re`.*
+
+8. **A hook that installs cleanly can fire zero times.** A summing hook was placed on a routine that
+   computes exactly the wanted value, passed its expected-original-bytes check on install, and then
+   fired **zero** times across a whole session — while a sibling hook installed in the same session
+   fired 889 times. The operation being hooked simply never went through that routine's caller.
+   Verifying the original bytes proves the instruction is at that address and nothing else: verify
+   the **call graph** before placing a hook and the **fire count** after.
+   *Owner: `guest-re`.*
+
+9. **The cache you rebuilt was not the copy on screen.** A stale on-screen number was diagnosed as a
+   derived-cache problem, and the fix rebuilt that cache across the whole container. A later session
+   measured the rebuild routine's stores: two halfwords, neither of them the field being drawn. The
+   real source was a pair of *byte-for-byte snapshots* of the whole record — a block copy into a
+   candidate-list array and a full-record `memcpy` into an equipped-slot array — baked by the equip
+   routine's tail, and the character's own bonuses were computed from the snapshot rather than from
+   the container. The earlier fix was **structurally void** for that symptom while looking entirely
+   correct. Before trusting a rebuild call to fix a display, enumerate that routine's stores.
+   *Owner: `guest-re`.*
+
+10. **A plausibility gate inside a resolver deletes features.** The routine that answers "is there a
+    live character here?" also required `current <= maximum` on a gauge, as a sanity check. Removing
+    a piece of equipment lowers maximum HP below current HP, so ordinary play violated it — and the
+    resolver then answered "no character", which silently removed the HUD and the quick bar and made
+    a refresh sweep see an empty container. Two separate player reports, one root cause. A gauge that
+    reads high is a gauge to **clamp when drawing**, not evidence that the object does not exist.
+    *Owner: `android-host`.*
 
 ### Refutation is a deliverable, not a failure
 
@@ -300,9 +424,144 @@ Practical consequences:
 - When a host reimplements a guest routine, the emulator runs both and diffs them. Not "looks
   right" — zero mismatched pixels, on at least two different game states.
 
+### An absence in a run is not a negative result
+
+> **(A) Write "not observed in this run; the run did not exercise it" — never "does not happen".
+> What you failed to observe is not evidence.**
+
+This is the most common way a *correct* reading becomes a *wrong* document, and it is free to
+prevent. **(B)** A reference-port session recorded that neither host nor guest ever stops the music,
+on the strength of a headless trace. The device then showed the guest stopping the music on every
+single sound effect, because it owns exactly one media clip and recycles it: stop music, play
+effect, restart music from bar one. The self-correction names the failure precisely — *"that was not
+evidence, it was an observation gap; the two buses simply never overlapped in that trace"* — and the
+measured call sequence, with timestamps, then became the test data for the fix.
+
+An observation gap is recorded like any other finding: what was run, what it did **not** cover, and
+what would close it. The same habit at the session level is
+[device-verification.md](device-verification.md) §5 — "unverified on device" is a shipped state.
+
+### A reading and a measurement can both be right about different questions
+
+> **(A) When static analysis and a live measurement disagree, the first move is not to pick a
+> winner. It is to write down the question each of them actually answered — they are usually not the
+> same question.**
+
+Framing static versus dynamic purely as *reliability* invites the wrong repair, which is to distrust
+the disassembly. The disassembly is normally accurate about what the routine does; it is simply not
+about what you asked.
+
+- **(B)** A handler was read correctly and a set of "plausible acknowledgement" replies derived from
+  it (§2's worked example). Every reply did what the handler said. The device then showed several of
+  them dismissing the on-screen modal without advancing the session state machine, after which the
+  client closed the socket cleanly. The reading answered *"what does this handler do?"*; the
+  question that mattered was *"what does the session need?"*.
+- **(B)** A hot-path attribution was taken from an aggregate counter reading ~26,000 calls per
+  second and assigned to the network receive path. The magnitude was right and the attribution was
+  wrong — per-category and hot-identifier counters showed the calls were a fill-rectangle primitive.
+  An aggregate gives you magnitude, never kind, and a documented attribution derived from a total is
+  more likely wrong than right.
+
 ---
 
-## 7. Where evidence lives
+## 7. What a search result licenses
+
+The confidence grid in §2 asks how strong a claim is. This section asks a narrower question that is
+answered wrongly far more often: **given how you looked, what is this result actually evidence
+about?** Every rule here is one sentence; the procedure each implies is owned by
+[investigation-discipline.md](investigation-discipline.md), and the shape of the guard implied by
+§7.5 by [guarding-destructive-operations.md](guarding-destructive-operations.md).
+
+### 7.1 A narrowed search is evidence about the window, not about the binary
+
+> **(A) A search window centred on where you expect the answer can only confirm or mislead. It
+> cannot discover. Record the extent of the window next to the result.**
+
+A narrow window never reports failure: it always returns a best-in-window candidate, and that
+candidate is indistinguishable from an answer. **(B)** Three consecutive sessions of the reference
+port produced three different wrong addresses for one flag byte, each from a ~128-byte watch chosen
+because a previous carrier's build had the field nearby. Widening the watch to the entire god object
+— 43 KB, diffed twice a second, on the reasoning that *"it is a `memcpy`, there is no reason to
+narrow it"* — produced exactly one persistent zero-to-nonzero write at the moment of the in-game
+action, and the same run printed zero for all three historical candidates, retiring them in the same
+breath.
+
+### 7.2 An empty search is a claim about the search
+
+> **(A) Zero hits is the single most misread result in reverse engineering. Undocumented it reads as
+> "the field is dead"; documented with its blind spot it reads as a work item with a starting
+> point. Writing down what the search could not have caught is an obligation, not modesty.**
+
+Cost: one sentence. Payoff: see the (B) case in §4's fifth field, where that one sentence is the
+whole reason the next session opened in the right place.
+
+### 7.3 Several individually sound measurements that disagree describe a shape
+
+> **(A) When several sessions each measure a different but individually correct-looking value for
+> "the same offset", stop adjudicating. The offset is not a constant — it is an array indexed by a
+> live value, and every past measurement is one element of it.**
+
+Contradictory-but-sound measurements are data about the structure, not a dispute to be settled by
+picking a winner. **(B)** Three historical answers for one flag — one inherited from another
+carrier's notes, one measured on a device, one recorded as "refuted" — turned out to be elements 0,
+1 and 6 of `base + <index word>`, and the index word was already in the project's anchor table under
+a different name because the save chain reads the same word. This shape is invisible to a
+literal/displacement cross-reference search, because nothing in the image materialises the final
+address; a static sweep therefore reports zero sites and the field looks dead. It also explains
+every "it worked for me once" report: the write landed while the index happened to equal the value
+baked into the host.
+
+### 7.4 An address is half of a fact; the reader's predicate is the other half
+
+> **(A) How the guest READS a field is part of the field's contract. An anchor for a host write is a
+> triple — offset, value, and the predicate the reader applies — and a table that stores only the
+> offset hands the next porter the half that does not make the feature work.**
+
+A write at the right address with the wrong-shaped value fails silently and presents *identically*
+to a wrong address, so the investigator goes back to hunting the address that was already correct.
+**(B)** Three instances in one port: a flag whose reader did `ldrb; lsls #24; asrs #24; cmp #0; bge`
+— a bit-7 test, so writing `1` at the proven-correct address did nothing; a stack count read through
+the same sign-extension, making 128 negative so the client *subtracted* from the player's stack; and
+a capacity byte read with `ldrsb`/`bge`, where a legitimate 128 became −128 and killed two
+navigation gates at once. In each case the deciding evidence was the *reader's* instruction
+sequence, not the writer's. A corollary worth carrying to every wire format: any field the guest
+sign-extends has a real maximum of 127 whatever the protocol permits.
+
+### 7.5 One observation of an event licenses a claim about one path
+
+> **(A) Before you build anything on "this is what the game does when X happens", count how many
+> code paths produce X. A guard placed on one of two paths is verified by the reporter's
+> reproduction, ships, and is defeated by the sibling path.**
+
+Prefer a signal taken from the event itself over a proxy that merely correlates with it, and check
+the proxy's **cardinality** before trusting it — "once per session" versus "once per action" decides
+whether it can carry the signal at all, and it is answerable statically from the call sites.
+**(B)** A save guard in the reference port pinned the player's chosen slot on the edge where the
+network socket opened. The socket opens exactly once per session, at an instant when a menu entry
+has just reset the cursor to zero, so the pin could *structurally* only ever be zero. Rebuilt around
+the network load — which is observable because it emits a frame — it was then defeated one build
+later by the local start-game load, which reads the same records and emits nothing. The version that
+held observes the record read itself, which both paths perform.
+
+### 7.6 Inherited output is unverified until you re-derive it
+
+> **(A) Output from an automated investigation whose verification stage did not run is labelled
+> unverified in the handoff, and every address in it is re-derived from the binary before it is
+> believed.**
+
+Partial automated output looks exactly like finished output: structured, confident, and full of
+addresses. **(B)** A reference-port session stopped with one of four investigation branches complete
+and no adversarial verification run at all. The handoff said so and named the artefacts; the next
+session re-derived every address from the shipping binary rather than inheriting any, and found that
+the handoff's reading of one call was exactly inverted. That handoff also generalised its own
+lesson: two earlier expensive failures — a hook that never fired, a rolled-back padding hypothesis —
+were "both the same mistake: jumping from an inference straight to a symptom with no verification
+step". Compare §4 item 7: a citation you inherit is in the same category as a tool's output you
+inherit.
+
+---
+
+## 8. Where evidence lives
 
 | artifact | holds | rule |
 |---|---|---|
@@ -312,16 +571,19 @@ Practical consequences:
 | Selftests | Encodings, formats, state machines, patch halfwords. | The assertion message names the finding. See [selftest-convention.md](selftest-convention.md). |
 | Probe runs | Everything about behaviour. | Runs are reproducible because the clock is virtual — record the exact invocation. |
 | Transcripts / frame dumps | Ground truth from the device. | Keep them **outside** the source tree; they contain user data. |
+| Handoff notes | What an unfinished or automated investigation produced. | Labelled unverified where the verification stage did not run; addresses re-derived before use (§7.6). |
 
 **One canonical document.** When several documents describe the same subsystem they drift, and a
 reader has no way to tell which is current. Nominate one file as canonical per subsystem, state at
 the top of it that it corrects the others, and put an appendix in it listing the specific
-now-wrong statements elsewhere. The reference port did exactly this and it is why its six
-corrections were recoverable at all.
+now-wrong statements elsewhere. The reference port did exactly this, and it is the only reason its
+corrections were recoverable at all. In a long append-only log, say which artefact is current — one
+live task table at the top, everything below it explicitly labelled finished history, with reading
+order stated newest-first ([investigation-discipline.md](investigation-discipline.md) §14).
 
 ---
 
-## 8. Checklist
+## 9. Checklist
 
 Before a finding is considered recorded:
 
@@ -330,7 +592,15 @@ Before a finding is considered recorded:
 - [ ] Confidence written on both axes, e.g. `HIGH / CONFIRMED`.
 - [ ] Anything INFERRED carries `⚠` until something runs.
 - [ ] Anything you will build on has **two independent derivations**, and the two routes are named.
+- [ ] Two readings of one instruction were settled by computation, not by re-reading.
+- [ ] The extent of the search is recorded with the result, including what it could not have caught.
+- [ ] Contradictory-but-sound measurements were treated as a shape (an array), not adjudicated.
+- [ ] Any host write records the reader's predicate, not only the offset.
+- [ ] The number of code paths that produce the observed event was counted before anything was built
+      on one observation of it.
+- [ ] Absences are written as observation gaps, naming what the run did not exercise.
+- [ ] Anything inherited — a citation, a handoff, an automated tool's output — was re-derived.
 - [ ] Measured constants carry symptom + measurement + date at the definition site.
 - [ ] Refuted claims are preserved with their disproof, not deleted.
-- [ ] Behavioural claims cite a run, not a reading.
+- [ ] Behavioural claims cite a run, not a reading, and name the question that run answered.
 - [ ] Nothing recorded here is a secret, a credential, a key, or copyrighted content.

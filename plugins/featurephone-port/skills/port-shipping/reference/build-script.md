@@ -5,7 +5,7 @@ Provenance: **(A)** generic · **(B)** worked example from one reference port ·
 ## Contents
 
 1. [The pipeline in one picture](#1-the-pipeline-in-one-picture)
-2. [The ten stages](#2-the-ten-stages)
+2. [The stages](#2-the-stages) — [2.1 Stage 0, the two input gates](#21-stage-0--the-two-input-gates-and-why-neither-is-optional) · [2.2 The headless soak](#22-the-gate-that-is-not-a-stage-the-headless-soak)
 3. [Flags](#3-flags)
 4. [versionCode discipline](#4-versioncode-discipline)
 5. [version.properties encoding](#5-versionproperties-encoding)
@@ -14,7 +14,7 @@ Provenance: **(A)** generic · **(B)** worked example from one reference port ·
 8. [The output filename is the diagnostic](#8-the-output-filename-is-the-diagnostic)
 9. [apksigner verification: the fingerprint is the app's identity](#9-apksigner-verification-the-fingerprint-is-the-apps-identity)
 10. [Install and launch](#10-install-and-launch)
-11. [The AAB is a separate command](#11-the-aab-is-a-separate-command)
+11. [The AAB is the exception, not the terminal state](#11-the-aab-is-the-exception-not-the-terminal-state)
 12. [Shipping a sideload build](#12-shipping-a-sideload-build)
 13. [Two update rules that are really distribution rules](#13-two-update-rules-that-are-really-distribution-rules)
 14. [Warts to avoid reproducing](#14-warts-to-avoid-reproducing)
@@ -24,6 +24,9 @@ Provenance: **(A)** generic · **(B)** worked example from one reference port ·
 ## 1. The pipeline in one picture
 
 ```
+   ★ GATE 0 (before anything expensive): the game archive EXISTS  +  every generator's
+              --check is clean  →  hard failure, not a warning
+   ▼
 wie_android/src/*.rs
    │  cargo ndk -t arm64-v8a --platform 26 -o <jniLibs> build [--release]
    ▼
@@ -45,12 +48,23 @@ it; it reads it through the platform asset manager, which is the only zero-permi
 ship guest content. A missing asset is a logged error and a black screen, **not** a crash — see
 [scaffolding.md](scaffolding.md) §9.2 for the fail-fast Gradle check that a template must add.
 
-## 2. The ten stages
+**(A) "Packages wholesale" has an unstated and expensive consequence: NOTHING ELSE may live in
+that directory.** Not a backup, not a pristine `.orig`, not a dry-run `.new`. **(B)** It shipped
+twice on the reference — one tool's backup left beside the archive added **1.76 MB** to a release,
+and later two by-products added **3.53 MB** of licensed content to a build that was handed to
+people. Every gate passed both times; the only tell was artifact size. Backups belong outside every
+packaged directory, at a path computed by one shared function
+([archive-prep/reference/generated-assets.md §7](../../archive-prep/reference/generated-assets.md#7-where-by-products-live-and-why-pristine-is-moved-rather-than-deleted)).
 
-Both host scripts implement the same names in the same order.
+## 2. The stages
+
+Both host scripts implement the same names in the same order. **(A)** Stage 0 is the newest and the
+cheapest: it is the only stage that can fail in under a second, and it guards the two input classes
+no later stage can see.
 
 | # | stage | detail |
 |---|---|---|
+| 0 | `check-inputs` | ★ gate — the game archive exists **and** every generator's `--check` is clean. Hard failure. §2.1 |
 | 1 | `discover-tools` | candidate lists for SDK / NDK / JDK / adb / build-tools; hard-fail naming the env var. [toolchain.md](toolchain.md) §11 |
 | 2 | `host-shim` | windows-gnu only; no-op elsewhere. [host-portability.md](host-portability.md) |
 | 3 | `bump-version` | release only, unless `--no-bump`. §4 |
@@ -70,6 +84,53 @@ twice:
 ```kotlin
 packaging { jniLibs { keepDebugSymbols += "**/*.so" } }
 ```
+
+### 2.1 Stage 0 — the two input gates, and why neither is optional
+
+**(A) Gate 0a — the archive EXISTS.** Put it in the host build script, **before** the native build,
+and make it a **hard failure with the exact path it wanted**. The archive is the one input the
+repository cannot carry itself, so a fresh clone has no assets directory at all.
+
+**(B) It is a gate because it already shipped without one.** A build produced on a second machine had
+no archive; the packager took the empty directory, the build reported success, the signature
+verifier passed, the install succeeded — and the app aborted on its first log line. It was handed to
+a user in that state. Every stage upstream of the phone passes, which is why a warning is not
+sufficient: warnings scroll past in a build that ends with `BUILD SUCCESSFUL`.
+
+**(A) Gate 0b — presence is not correctness.** A generated or patched member that is **present but
+stale** is a worse failure than a missing one, because it survives every gate in this pipeline *and*
+a boot smoke test: the game starts, shows its title, and dies a few hundred frames later. So stage 0
+also runs **every generator's `--check`**: rebuild the derived artifact in memory from the pristine
+source, byte-compare it against the file that will ship, exit non-zero on mismatch, and print the
+regeneration command.
+
+**(B)** A build **range** — ten consecutive releases — shipped in exactly that state, with a data
+member left pristine while the guest patches assumed the newer layout; the guest parser overran an
+array and asked the allocator for a negative size. The symptom read as "the game starts and stops on
+a black screen", which does not look like an asset problem. The gate was written afterwards and
+caught a **second, independent** instance of the same class, on a different machine, on its first
+run. Mechanism and tooling:
+[archive-prep/reference/generated-assets.md](../../archive-prep/reference/generated-assets.md);
+the fault as a symptom:
+[archive-prep/reference/fault-dictionary.md F11](../../archive-prep/reference/fault-dictionary.md#13-f11-black-screen-shortly-after-the-title-allocation-failure-with-a-negative-size).
+
+⚠ **(A) CI has no archive**, so gate 0a must be *skippable by an explicit flag* in CI — and a build
+with that flag set must never produce a distributable artifact. Gate 0b's checks split: the ones
+whose inputs are all in-repo run in CI unchanged; the ones that need the archive are **skipped, not
+faked** ([testing-and-ci.md](testing-and-ci.md) §9).
+
+### 2.2 The gate that is not a stage: the headless soak
+
+**(A)** Stage 0 catches staleness you can compute. A **long headless run** catches everything else
+that only appears after the title screen, and it is the one pre-release gate this pipeline cannot
+express as a build step:
+
+> **A few thousand frames of scripted input with zero fatal tick errors, zero allocation failures
+> and zero panics** — not one non-black frame.
+
+**(B)** On the reference port the difference between the two is stark: the stale-member build died at
+frame **557** and its fix ran **5,200** frames clean. A first-frame smoke test reports both as
+healthy. Run it before every handout; details in [testing-and-ci.md](testing-and-ci.md) §5.
 
 ## 3. Flags
 
@@ -135,8 +196,11 @@ Every choice here is load-bearing **(A)**:
   first line of defence; the `.gitignore` rule for `*.jks` is the second.
 * **PKCS12, not JKS.** JKS is legacy, `keytool` nags on every use, and `apksigner` reads PKCS12
   natively.
-* **`-validity 10000`** (~27 years). Play rejects keys that expire before 2033-10-22, and an
-  expired key is a key you can no longer ship updates with.
+* **`-validity 10000`** (~27 years). State the reason **without** reference to any store policy,
+  because most ports of commercial titles never go near one (§11): an expired key **cannot sign**,
+  and re-keying orphans every existing install — the only path back is uninstall-and-reinstall,
+  which destroys every player's save. Long validity is therefore required no matter how you
+  distribute. (A store adds its own expiry floor on top; that is a second, weaker reason.)
 * **Refuse to overwrite.** Overwriting orphans every existing install — an existing user cannot
   update, only uninstall (losing their save) and reinstall.
 * **Require the three secrets to be pre-set** in the environment and throw with the exact
@@ -191,6 +255,13 @@ app-release-unsigned.apk    <- no signing config resolved
 Have the script take whichever file exists, and re-warn if the name matches `*unsigned*`. Do not
 rename the artifact before that check; you would be deleting the only evidence.
 
+**(A) And do not rename it *after* the check either — copy instead.** The later install stage
+locates the artifact by the packager's own filename, so renaming in place turns a perfectly good
+build into `no APK found` at install time. **(B)** That failure is recorded as a standing warning in
+the reference port's handout directory. The rule that avoids both problems: **the packager's output
+is never moved or renamed; the handout artifact is a COPY** into the distribution directory under
+the handout naming convention (§12).
+
 ## 9. apksigner verification: the fingerprint is the app's identity
 
 ```
@@ -224,18 +295,35 @@ resolving and you get "class not found" from `am start` on a perfectly good APK.
 script.** The reference did, and that serial is one of the values that had to be scrubbed before
 publication — see [publish-audit.md](publish-audit.md).
 
-## 11. The AAB is a separate command
+## 11. The AAB is the exception, not the terminal state
 
-`:app:bundleRelease` is deliberately **not** in the build script:
+**(A) For a port of a commercial title the public-store path is normally ruled out, not merely
+rare.** Decide it once, explicitly, and write it down: the documented default shape of this pipeline
+is a **signed APK handed to specific people**. **(B)** The reference port made "no public store,
+ever — sideload only" a standing decision, and kept every other piece of this file intact, because
+none of it was store-driven in the first place.
+
+What the store path *additionally* forces you to publish is the part people forget when they treat
+it as a continuation of the build: **listing imagery** — which for a port is derived from the
+original's art and is exactly the category the publish audit refuses — plus a store identity and a
+content rating. That is a separate decision from the build. The posture, the handout manifest and
+the recall ledger live in [distribution-and-recall.md](distribution-and-recall.md).
+
+If you do go that way, `:app:bundleRelease` is deliberately **not** in the build script:
 
 ```
 cd android_app && ./gradlew :app:bundleRelease
 ```
 
 Keeping it manual means the frequent path (`--release` → APK, sideload, test) stays fast, and the
-rare path (store upload) is an explicit act. If you automate it, keep it behind its own flag and
-run the same gates — an AAB is signed and versioned exactly like the APK, and Play Signing will
-re-sign it with the upload key, so **the upload key is a second key you must also never lose**.
+rare path is an explicit act. If you automate it, keep it behind its own flag and run the same
+gates — an AAB is signed and versioned exactly like the APK, and store-side signing will re-sign it
+with the upload key, so **the upload key is a second key you must also never lose**.
+
+⚠ **Sideload-only removes the store's review; it removes none of the installer's rules.**
+versionCode must still increase, the certificate must still be byte-identical forever, and the
+applicationId is still the on-device data path. "There is no store to reject it" is never a reason
+to relax §4, §6 or §9.
 
 ## 12. Shipping a sideload build
 
@@ -247,7 +335,13 @@ A `dist/README.md` next to a handout build should carry — and this convention 
 * **the certificate fingerprint, with "do not install if this differs"**;
 * which server/config was baked in (the *fact*, not the secret — say "points at the public
   server" or "loopback only");
-* a note for every build ever withdrawn and why (someone still has that file);
+* **the withdrawn-build ledger** — not a note. It only grows, and it must separate two different
+  statements, because they ask the reader for different things:
+  * **RECALLED** — this build can destroy player data. Name the version ceiling and the mechanism in
+    one clause ("*vc ≤ N: opening another slot from the title screen overwrites the loaded
+    character*"). **(B)** Two separate save-destroying defects each produced such a line in the
+    reference port.
+  * **DO NOT HAND OUT** — a mid-session intermediate with a known bug. Annoying, not destructive.
 * the exact command to reproduce the build;
 * the honest closing statement: *"signing credentials live outside this repository, so this
   repository alone cannot produce an APK with the same fingerprint."*
@@ -255,6 +349,18 @@ A `dist/README.md` next to a handout build should carry — and this convention 
 ⚠ **Do not commit the APK itself.** See [publish-audit.md](publish-audit.md) §2 — a built APK
 embeds the game archive *and* every baked constant, and a tracked file is never re-evaluated
 against `.gitignore`.
+
+★ **(A) A recall line has to be written where the next person actually looks.** Its audience is not
+the player who already has the file; it is **whoever next decides which artifact to hand someone** —
+which is you, four months later, or a collaborator. So the same one-line recall goes into the
+document every session reads first, as well as into the handout README. A recall that lives only
+beside the artifact is a recall nobody reads.
+
+★ **(A) Keep exactly ONE build in the handout directory: the current one.** At the moment of handing
+something over, nobody re-reads a changelog to work out which file is newest — and a recalled build
+surviving beside the current one is precisely how it gets distributed. The ledger records the dead
+ones; the directory holds one file. Full posture, manifest and ledger:
+[distribution-and-recall.md](distribution-and-recall.md).
 
 ## 13. Two update rules that are really distribution rules
 
@@ -274,7 +380,12 @@ Observed in the reference **(C)** — do not carry them into a template:
 * **A duplicated print block.** The config summary was printed twice, the second copy
   re-deriving its values from the environment. Harmless but dead weight, and the two copies
   drifted (one emitted a non-ASCII character that PowerShell 5.1 renders as `??`). Emit one.
-* **Hardcoded device serial and hardcoded adb path.** Env var + candidate list.
+* **Hardcoded device serial and hardcoded adb path.** Env var + candidate list. And an install
+  step that picks "the attached device" silently is how a build gets verified on the wrong phone —
+  [device-verification.md](../../../shared/device-verification.md).
+* **Tool by-products written into the packaged assets directory.** A backup or a dry-run `.new`
+  beside the archive ships inside the artifact (§1). Every tool's output path comes from one shared
+  function, and that function never points inside a packaged directory.
 * **A `.cargo/config.toml` full of absolute linker paths** that cargo-ndk's environment variables
   override anyway, with an API level disagreeing with both `--platform` and `minSdk`. Delete it.
 * **The NDK revision written out in three files.** Two is the practical minimum; make the third

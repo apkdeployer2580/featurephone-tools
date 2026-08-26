@@ -12,7 +12,7 @@ Four constants turn a bag of bytes into a navigable image. Every static tool in 
 6. [The god-object slot](#6-the-god-object-slot)
 7. [Validation: when is the model pinned?](#7-validation--when-is-the-model-pinned)
 8. [Failure modes and what each looks like](#8-failure-modes)
-9. [When none of this applies](#9-when-none-of-this-applies)
+9. [When none of this applies — and the second address model](#9-when-none-of-this-applies--and-the-second-address-model)
 
 ---
 
@@ -27,6 +27,8 @@ reloc_unit  = "file_offset"   # which one. Get this wrong and every tool lies qu
 ```
 
 The values above are **(B)** — one real KTF title. `image_base` is a property of the *loader*, so it is shared by every KTF title; the other three are properties of *this* binary and must be re-derived.
+
+**⚠ First check that your image *has* these constants.** All four describe a **flat, self-rebasing** image: one blob mapped at one base, statics reached through `sl`, stored pointers carrying a link-time bias. A second, equally common shape — a **fully linked ELF with live section headers** — has **none of the four**, and the model collapses to one line. The check takes ten seconds: does the native member begin with `\x7fELF`, and does a section table print? If so, go to [§9.1](#91-the-second-address-model-a-section-mapped-elf) now rather than spending a day fitting a relocation delta to an image that has none.
 
 Pin them in this order. Each one is used to validate the next:
 
@@ -108,7 +110,9 @@ If the backend derives BSS from a header field or from a descriptor key instead 
 
 ### What RWPI means, and why it shapes every tool
 
-The image is built with the ARM toolchain's **Read-Write Position Independent** model. The practical consequences:
+**Precondition: that your image is RWPI at all.** Everything in this section applies to an image built with the ARM toolchain's **Read-Write Position Independent** model. A section-mapped ELF build addresses its statics with **absolute literals** and has no `sl` — if the entry point has no `sl` prologue and no route in this section produces a candidate, stop looking and read [§9.1](#91-the-second-address-model-a-section-mapped-elf) before you spend an afternoon on a density scan.
+
+The practical consequences of RWPI:
 
 1. **Static and global data is addressed as `[sl, #imm]`**, where `sl` is r10 — some builds use `sb`, r9. There are **no absolute data addresses in the instruction stream**. Your disassembler must recognise all four spellings (`sl`, `r10`, `sb`, `r9`) or you will conclude the binary has no globals.
 2. **Every function sets `sl` up itself**, typically:
@@ -240,9 +244,26 @@ Reference example **(B)**: `CHAR = *(sl + 0x444)` i.e. `*(0x1b3084)`, with a har
 
 **Validate every pointer hop, every time.** A stale handle must produce `None`, never a render of whatever was there. **(A)**
 
-### The KTF indirect-handle convention **(B, but check for an analogue on your platform)**
+### The indirect-handle convention — a property of the *carrier runtime*, not of the game **(B, and derive yours)**
 
-In the reference platform, an allocation handed to the guest is an indirect handle: the **payload starts 8 bytes after the handle word**. So `object = *(handle) + 8` appears everywhere — in the god-object resolution, in the save primitives, in the offscreen-buffer walk. If your first pointer hop lands 8 bytes short of something that looks almost right, you have found your platform's version of this.
+In one reference platform, an allocation handed to the guest is an indirect handle: the **payload starts 8 bytes after the handle word**. So `object = *(handle) + 8` appears everywhere — in the god-object resolution, in the save primitives, in the offscreen-buffer walk. As a **discovery heuristic** this still stands, and it is still the fastest one: if your first pointer hop lands 8 bytes short of something that looks almost right, you have found your platform's version of it.
+
+> **REFUTED.** *"This is a property of the platform — find the convention once, then apply it wherever the game hands you a container."*
+>
+> **Refuted by:** reading the two carrier runtime crates that host the **same game**. The convention is neither the game's nor "the platform's" loosely — it is the body of **one function in the carrier runtime**, the accessor that turns a container handle into a data pointer. One carrier's is `*(handle) + 8`; the other's is the **identity function**, so the same game's containers are plain direct pointers there. `HIGH / CONFIRMED` — two runtime crates read, and the corrected host renderer then diffed pixel-identical against the guest's own buffer.
+>
+> **Why the wrong reading was attractive:** the convention appears at every container in the image, which makes it look like a property of the world rather than of one accessor — and it is invisible in the guest disassembly, because the guest just calls the platform.
+>
+> **Consequence if carried forward:** the wrong convention **does not fail loudly**. Double-dereferencing a direct pointer reads the container's first word *as an address*; when that word happens to land inside the heap window it passes every plausibility check you wrote and yields **wrong records** instead of `None`. Three already-shipping functions in the reference port were wrong in exactly this way at the same time. The "8 bytes short of something that looks almost right" tell only describes the benign direction.
+
+**What to do instead (A).** Because it is one function, **one build-keyed flag resolves every container in the game simultaneously** — inventory grid, area objects, the item database, map arrays, offscreen framebuffers, popup label arrays, sprite descriptors:
+
+```rust
+/// None = the handle IS the data pointer; Some(n) = payload starts n bytes past *(handle).
+fn container_data_off() -> Option<u32>;
+```
+
+Derive it by **reading the carrier runtime's accessor**, not by inferring it from one hop that looked plausible, and pin **both** conventions in a selftest so a build that switches cannot pass silently. Where that flag lives is [build-keyed-anchors.md](build-keyed-anchors.md); the general lesson — that an apparent game property is frequently a carrier-runtime property — is [multi-build.md](multi-build.md) §4.
 
 ---
 
@@ -250,6 +271,7 @@ In the reference platform, an allocation handed to the guest is an indirect hand
 
 Do not proceed to Phase 2 until all of these hold:
 
+- [ ] The image's **shape** was established first — flat and self-rebasing, or section-mapped ELF (§1, §9.1). On a section-mapped image the rest of this checklist does not apply.
 - [ ] `IMAGE_BASE` was read from the loader source, not guessed.
 - [ ] `bss_size` parsed from the documented source (filename or header) and the game boots.
 - [ ] `sl_fo` agreed by **two** of {register dump, entry thunk, density scan}.
@@ -273,11 +295,47 @@ Do not proceed to Phase 2 until all of these hold:
 | `solve_reloc.py` returns dozens of candidates | too few known strings, or one of them is not referenced | The intersection is under-constrained; add targets and use `--near-miss` |
 | Profiler PCs disassemble to mid-instruction garbage | printing guest addresses where file offsets were expected, or ARM-vs-Thumb confusion | Both bases produce *a* decode |
 | Everything is right but one region decodes as nonsense | it is a literal pool or a jump table, not code | Use `dis.py --resilient`, which emits `.hw 0xNNNN` and advances 2 |
+| No `sl` candidate survives any of the three routes, and the entry point never rebases | the image is not RWPI — it is section-mapped (§9.1) | Every route "fails quietly": there is no error, just no dense pointer run anywhere |
+| A pointer-plausibility guard that worked on build 1 rejects **every** pointer on build 2 | the window's lower bound is build 1's image base | Both builds' addresses are small round numbers; `0x1000` and `0x100000` look equally like "the start of the image" |
+| A `.data`-resident table looks observable only at runtime | your tool maps `.text` only (§9.1) | A tool that hardcodes one section's mapping answers "nothing there" instead of "I cannot see there" |
 
 ---
 
-## 9. When none of this applies
+## 9. When none of this applies — and the second address model
 
 * **The jar is full of `.class` files.** There is no ARM image, no `sl`, no relocation delta. Skip this entire document; use JVM-level tooling and keep only the probe, differential-verification and evidence practices.
 * **The native member is compressed or encrypted.** Extract and decompress first (`archive-prep`), then start here on the plaintext image. If a member is encrypted, that is out of scope for this plugin: no extracted decryption keys are shipped, documented or defaulted anywhere in it.
 * **The image is ARM-mode, not Thumb.** Set `isa = "arm"` in `target.toml`. The `+1` Thumb bit on entry disappears, function pointers lose their low bit, and the "both Thumb idioms" note in [static-toolkit.md](static-toolkit.md) is replaced by ARM's rotated-immediate encoding. Everything structural above is unchanged.
+* **The native member is a fully linked ELF with live section headers.** Then all four constants above **cease to exist** — not "take different values". This is common enough on a second carrier that it deserves its own model, below.
+
+### 9.1 The second address model: a section-mapped ELF
+
+**(A)** A second AOT-ARM carrier's native member can be an ordinary linked 32-bit ARM ELF whose section table survived. Its loader does not map one blob at a base; it walks the section headers, maps every section with a non-zero `sh_addr` at that address for `sh_size`, and enters at `e_entry`:
+
+```rust
+for shdr in elf.section_headers() {
+    if shdr.sh_addr != 0 { core.load(bytes_for(shdr), shdr.sh_addr, shdr.sh_size)?; }
+}
+core.run_function(elf.ehdr.e_entry, &[])?;      // no rebase argument, and no rebase step
+```
+
+The boot chain around it is [boot-order.md](../../emulator-core/reference/boot-order.md) §8b; carrying a document written against one model over to the other is [multi-build.md](multi-build.md) §5. What follows is only the addressing.
+
+| the flat, self-rebasing model | the section-mapped model |
+|---|---|
+| `image_base` — one base added to every file offset | **gone.** Each section has its own `(sh_offset, sh_addr, sh_size)`; `guest_address = sh_addr + (file_offset - sh_offset)` **within that section** |
+| `bss_size` — parsed out of the member's filename | **gone.** `.bss` is a section header with a vaddr and a size and no file bytes |
+| `sl_fo` — an RWPI static base in r10 | **gone.** Statics are absolute literals; there is no `sl` and no static-slot table |
+| `reloc_delta` / `reloc_unit` — a bias on stored pointers | **gone.** The image is linked: a stored pointer *is* the address |
+| entry at file offset 0, guest self-rebases | entry at `e_entry`, nothing rebases |
+
+**Which tools survive.** `dump_table.py`, `xref.py slot`, `solve_reloc.py` and every `[sl,#imm]` annotation are **inapplicable**, not merely differently parameterised. Do not try to fit a delta to an image that has none — you will find one that scores badly and believe the corpus is unusual.
+
+**What replaces them is better.** Because every static reference is an absolute literal, **"who touches this global?" becomes a plain literal search** over `.text` *and* `.data` — the hard question (unknown code addresses) turns into the easy one (known data addresses). See [static-toolkit.md](static-toolkit.md) §8. The porting order inverts with it: pin the data model first, and every later code hunt is cheap.
+
+**Two traps that follow from the model, both real (B):**
+
+* **A tool that maps only `.text`** — the natural shortcut, since `.text` is where you disassemble — is structurally blind to `.data`, and `.data` is where dispatch tables, per-category constant tables and string-pointer arrays live. Read the section table and keep the right pair per section. A null result from a `.text`-only tool about a `.data` address is a **false negative**, not evidence.
+* **Every "is this a guest pointer?" window is per build.** One build's image starts near `0x100000`; a section-mapped build's `.text` can start at `0x1000`. A plausibility guard written for the first silently refuses every valid pointer on the second — and a refusal reads exactly like "the feature is not available here". Open the window at the **lowest mapped page of the build that actually booted**, and key it like every other per-build value ([build-keyed-anchors.md](build-keyed-anchors.md)).
+
+Everything else in this plugin is unchanged by the switch: the probe, the evidence standard, differential verification, patching and the recipes all apply as written. Only the arithmetic that turns a file offset into a guest address differs — and on this model there barely is any.

@@ -1,13 +1,13 @@
 ---
 name: guest-re
-description: Reverse-engineers a feature-phone game's guest ARM binary and settles every behavioural claim in a headless probe run rather than from disassembly. Pins IMAGE_BASE, the BSS size, the RWPI static base sl and the relocation delta; finds strings, message ids, refusal gates, reward formulas, struct offsets and asset formats; then patches guest RAM and calls guest routines safely from the host. Covers read-verify-then-write patching, Thumb re-encoding, proving a code range dead before using it as scratch, three-state async guest calls, and differential verification of host reimplementations. Use when the user asks to find an address, offset, function, string or table inside client.bin or a guest image; to disassemble or cross-reference the guest; to patch a Thumb instruction or immediate; to call a guest function from the host; to run, script or extend the headless probe; to decode a sprite, item or text table; or to prove a guest offset really is the field they think it is.
+description: Reverse-engineers a feature-phone game's guest ARM binary and settles behavioural claims in a headless probe run rather than from disassembly. Pins the address model — a flat self-rebasing RWPI image (image base, BSS, sl, reloc delta) or a section-mapped ELF; finds strings, message ids, refusal gates, reward formulas, struct offsets, live records and asset formats; then patches guest RAM, calls guest routines, and mutates the game's own inventory records safely. Covers read-verify-then-write patching, Thumb re-encoding, trap hooks, scratch space, async guest calls, per-build anchor tables, and decoding an upgrade or drop formula well enough to print honest odds. Use when asked to find an address, offset, function, string or table in a guest image; disassemble or cross-reference it; patch a Thumb instruction; call a guest function; run or extend the headless probe; decode a sprite, item or text table; support a second carrier build; or prove an offset is the field they think it is.
 license: MIT
 ---
 
 # Guest binary RE and host-to-guest control
 
 Owns: the guest image, the address model, the probe CLI contract, patching, and calling guest code.
-Not here: emulator internals (`emulator-core`), Android UI (`android-host`), wire protocol (`server-revival`), archive repacking (`archive-prep`).
+Not here: emulator internals (`emulator-core`), Android UI (`android-host`), wire protocol (`server-revival`), archive repacking (`archive-prep`), and **not destroying the player's save** (`save-integrity` — it owns slot identity, the vault and the write policy; this skill only finds the routines).
 
 Applies to **AOT-compiled ARM guests** (a jar with no `.class` files and one large native member). For a bytecode guest, the static ARM toolkit below does not apply — only the probe and evidence sections do.
 
@@ -38,8 +38,13 @@ god_object  = 0x1b3084            # optional: static slot holding the main state
 
 Values shown are the reference port's **(B)**. Derive your own — see below.
 
+**⚠ Two shapes of image, and the four constants only describe one of them.** If the native member is a **fully linked ELF with live section headers**, none of the four exists: each section is mapped at its own `sh_addr`, entry is `e_entry`, statics are absolute literals, and "who touches this global?" becomes a plain literal search. Establish which shape you have *before* deriving anything — [reference/address-model.md](reference/address-model.md) §9.1.
+
+**If the title exists as more than one carrier package or revision**, read [reference/multi-build.md](reference/multi-build.md) before you re-derive anything by hand, and key every value you find from the first day ([reference/build-keyed-anchors.md](reference/build-keyed-anchors.md)).
+
 ## Phase 1 — Pin the address model
 
+0. **Establish the image's shape**: flat and self-rebasing, or section-mapped ELF. The rest of this phase applies only to the first.
 1. `image_base` from the platform loader's `load(data, BASE, len + bss)` call.
 2. `bss_size` from the native member's **filename** (`client.bin<N>`). Guest statics extend past EOF; an address beyond `len(file)` is not automatically invalid.
 3. `sl_fo` by **two of three** routes: a register dump from a provoked fault, the entry thunk's `ldr/mov sl/add sl,pc` prologue, or a density scan with `dump_table.py`.
@@ -68,7 +73,7 @@ Exit: a committed offset-to-text listing, the id-consuming accessor identified, 
 14. Anything you reimplement host-side gets **differentially verified**: make the emulator render both and diff the pixels. A mismatch is a bug, not an opinion.
 
 Exit: god object resolved; every offset you intend to build on has two independent derivations.
-→ [reference/probe-cli.md](reference/probe-cli.md) · [reference/recipes.md](reference/recipes.md)
+→ [reference/probe-cli.md](reference/probe-cli.md) · [reference/recipes.md](reference/recipes.md) · [reference/live-data-structures.md](reference/live-data-structures.md) · [reference/odds-and-formulas.md](reference/odds-and-formulas.md)
 
 ## Phase 4 — Drive the guest
 
@@ -80,7 +85,7 @@ Exit: god object resolved; every offset you intend to build on has two independe
 20. Verify in the probe first, then on a device. Re-run the standalone selftests.
 
 Exit: an idempotent patch that survives new-game/continue/death, and one host-initiated guest call chain completing on a device.
-→ [reference/patching.md](reference/patching.md) · [reference/calling-guest-code.md](reference/calling-guest-code.md)
+→ [reference/patching.md](reference/patching.md) · [reference/calling-guest-code.md](reference/calling-guest-code.md) · [reference/build-keyed-anchors.md](reference/build-keyed-anchors.md)
 
 ## Tools
 
@@ -113,6 +118,10 @@ The headless probe itself is a Rust crate in the template repo, not a plugin scr
 * [patching.md](reference/patching.md) — read-verify-then-write, block skips, dead-code scratch
 * [calling-guest-code.md](reference/calling-guest-code.md) — callability, three-state results, JVM attach, timeouts
 * [asset-decoding.md](reference/asset-decoding.md) — assert `consumed == filesize`, stride vs visible width, brute force
+* [live-data-structures.md](reference/live-data-structures.md) — mutating the guest's live records: layout, instance identity, compaction, derived caches, write plans
+* [odds-and-formulas.md](reference/odds-and-formulas.md) — recovering an outcome formula from its result strings, and printing odds a player can act on
+* [multi-build.md](reference/multi-build.md) — one title, N compiles: what transfers, seven re-derivation routes, the plausible-and-wrong bug
+* [build-keyed-anchors.md](reference/build-keyed-anchors.md) — the per-build anchor table: three gate axes, discipline tests, boot banner, coverage matrix
 
 Shared: `${CLAUDE_PLUGIN_ROOT}/shared/evidence-standard.md` (tags and confidence) · `${CLAUDE_PLUGIN_ROOT}/shared/selftest-convention.md` (dependency-free `include!` selftests) · `${CLAUDE_PLUGIN_ROOT}/shared/glossary.md` (RWPI, sl, ADF, BSS).
 

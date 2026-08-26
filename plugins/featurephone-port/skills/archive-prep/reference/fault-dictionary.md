@@ -1,6 +1,6 @@
 # Fault dictionary — archive preparation
 
-Every fault below was **reproduced** on a real title by deliberately breaking one thing in a known-good archive and running the headless probe. Panic texts are quoted from those runs.
+F1–F10 were each **reproduced** on a real title by deliberately breaking one thing in a known-good archive and running the headless probe; panic texts are quoted from those runs. F11–F13 arrived the other way round — they were **shipped**, in real builds, and are written up here so that nobody has to pay for them twice.
 
 Tags: **(A)** generic · **(B)** worked example from the reference port · **(C)** do not copy.
 
@@ -18,7 +18,10 @@ Tags: **(A)** generic · **(B)** worked example from the reference port · **(C)
 10. [F8 Fatal binary-patch failure after touching the guest image](#10-f8-fatal-binary-patch-failure-after-touching-the-guest-image)
 11. [F9 Bundled P/ saves do not seed the database (corrected claim)](#11-f9-bundled-p-saves-do-not-seed-the-database-corrected-claim)
 12. [F10 How all of this looks on a phone](#12-f10-how-all-of-this-looks-on-a-phone)
-13. [How to reproduce a fault deliberately](#13-how-to-reproduce-a-fault-deliberately)
+13. [F11 Black screen shortly after the title, allocation failure with a negative size](#13-f11-black-screen-shortly-after-the-title-allocation-failure-with-a-negative-size)
+14. [F12 The change you committed is not in the artifact](#14-f12-the-change-you-committed-is-not-in-the-artifact)
+15. [F13 One field is blank for some records, different ones each session](#15-f13-one-field-is-blank-for-some-records-different-ones-each-session)
+16. [How to reproduce a fault deliberately](#16-how-to-reproduce-a-fault-deliberately)
 
 ---
 
@@ -31,6 +34,8 @@ Tags: **(A)** generic · **(B)** worked example from the reference port · **(C)
 
 Nothing else discriminates as cheaply. A user reporting "it just doesn't work" should be asked for the line immediately before the failure, not for the whole log.
 
+**(A) There is a third band, and it is the one that ships:** the failure arrives **long after `loaded`**, past the title screen, once the guest reads a table that no longer matches what its code expects. Nothing in the boot path can see it — which is why F11 and F12 exist and why they need a byte-comparing gate rather than a smoke test.
+
 ## 2. The table
 
 | # | You did this | Fires | Exact text |
@@ -41,9 +46,12 @@ Nothing else discriminates as cheaply. A user reporting "it just doesn't work" s
 | F4 | native member renamed `client.bin<N>` → `client.bin` | after `loaded` | panicked at `ktf_class_loader.rs:94` — `FatalError("Invalid bss_size in filename client.bin: cannot parse integer from empty string")` |
 | F5 | KTF **bare jar**, no descriptor anywhere | after `loaded` | `WieError::FatalError("Main class not found")` |
 | F6 | forgot the virtual clock (`--ms`) | never — it just runs | `[probe] loaded`, work gauge advances, every dumped frame is 100 % black |
-| F7 | re-ran a repack on an already-patched archive | at repack time | `changed records {..} != expected {..}` (tool-defined; make yours say this) |
+| F7 | re-ran a repack on an already-patched archive, **or** the pristine copy is gone and the tool is reading its own output | at repack time | `changed records {..} != expected {..}`, or a record-count refusal such as `expected N records, got N+1` |
 | F8 | repacked or patched the guest image on disk while a hash-keyed patch entry exists | after `loaded` | fatal from `install_binary_patches` — hash matched no entry / entry produced zero patches |
 | F9 | (not a fault) bundled `P/` saves | — | no effect on the user database; strip them for privacy, not for behaviour |
+| F11 | a generated/patched data member and a guest constant disagree about the table's size | **after** the title screen | an allocation failure with a **negative** size, from inside the guest's own event loop; on a phone, "it starts and then stops on a black screen" |
+| F12 | the archive is gitignored, so your asset edit never reached this checkout | never — everything reports success | nothing. The commit exists; the member is pristine. Only a byte-comparing `--check` says so |
+| F13 | you deleted a byte the guest's *length* scan terminates on | at draw time, intermittently | nothing in any log. One field draws empty for some records, different ones per session |
 
 ## 3. F1 CRLF in the descriptor, or AID does not match the jar basename
 
@@ -157,9 +165,25 @@ Not an archive fault, but it is the most common misdiagnosis *of* an archive fau
 changed records set() != expected {17, 18, 24}
 ```
 
-This is correct behaviour and you should build it into your transform. The alternative — a tool that silently no-ops or, worse, applies the transform twice to a length-prefixed field — is how archives get quietly corrupted.
+This is correct behaviour for an in-place transform and you should build it into one. The alternative — a tool that silently no-ops or, worse, applies the transform twice to a length-prefixed field — is how archives get quietly corrupted.
 
-**Fix.** Restore from the backup the tool wrote on its first `--apply` and re-run from the original. That is what the `.orig` / backup-directory rule in [repacking.md](repacking.md) is for.
+**Fix.** Restore from the backup the tool wrote on its first `--apply` and re-run from the original. That is what the backup rule in [repacking.md §6](repacking.md#6-backups-idempotence-and-the-apply-gate) is for.
+
+### The second cause, which is more dangerous — and the discriminator
+
+**(A)** A transform that always rebuilds from a **pristine** copy *is* idempotent, so on that pipeline the refusal above cannot happen. A refusal there means something else entirely:
+
+```
+expected 15 records, got 16 — refusing
+```
+
+**The pristine copy has been deleted, so the tool is reading its own previous output as its source.** The message points at the record count — i.e. at the data model — and sends you to debug the parser instead of restoring a file. **(B)** In the reference port this happened when a by-product was cleaned out of the packaged assets directory by deleting it rather than moving it.
+
+> **The discriminator is one question: does a pristine copy still exist?**
+> Yes → you have an in-place tool run twice; restore and re-run.
+> No → recover the pristine artifact (from your out-of-repo backup, or by re-preparing the original dump) before touching the parser.
+
+Both causes are why the pristine copy is **moved, never deleted** ([repacking.md §6](repacking.md#6-backups-idempotence-and-the-apply-gate)).
 
 ## 10. F8 Fatal binary-patch failure after touching the guest image
 
@@ -201,7 +225,44 @@ Why carrying the wrong reason is harmful: it implies the strip is optional once 
 
 If you must read it from a device, grep logcat for the panic tag your host installs and capture the line *before* it as well — the `loaded` boundary of §1 is what you need.
 
-## 13. How to reproduce a fault deliberately
+## 13. F11 Black screen shortly after the title, allocation failure with a negative size
+
+**(A) The most expensive archive fault in this file, because every gate upstream of the phone passes.** The archive is present, correctly named, correctly repacked, signed and installed. The game boots, shows its title, and dies a few hundred frames later.
+
+Cause: **a data member and a guest constant disagree about the size of a table.** The guest's parser walks one record past the end of an array, reads the following bytes as a record length, that length is a signed 16-bit value, and the allocator is called with a negative size:
+
+```
+Allocation failure
+```
+
+**(B) Reproduced by accident, in ten consecutive shipped builds.** A generated table was left at its pristine record count while the guest-side constants had already been patched to the new one. Nothing noticed: the build script passed, the signature verified, and the **boot smoke test passed too — because the death is after the boot.**
+
+**Fix and gate.** Restore the pair to agreement, then add the gate that would have caught it: a `--check` that rebuilds the derived member in memory from pristine and byte-compares it against the shipping archive, exiting non-zero ([generated-assets.md §3](generated-assets.md#3-the-structural-fix-a-byte-comparing---check-that-exits-nonzero)). Confirm with a **long** probe run rather than a first-frame check: **(B)** the same content died at frame 557 before the fix and survived 5,200 frames with zero tick errors after it.
+
+**(A) Note the shape, because it generalises past archives:** any generated artifact whose *generator* and whose *consumer* are versioned separately needs a byte-comparison gate, not an existence check.
+
+## 14. F12 The change you committed is not in the artifact
+
+**(A)** You edit a table, run the tool, verify it, commit, and a later session finds the member byte-identical to pristine. Nothing failed. There is no error to search for.
+
+Two causes, both silent, and you should check them in this order:
+
+1. **The archive is version-control-ignored, so it did not travel.** A session run on a different checkout leaves only source, documentation and a version bump behind — the asset work stays on the machine that did it. **(B)** The reference port's check gate caught exactly this on its first use: the shipping archive on that machine had never received the previous session's edit.
+2. **A second tool rebuilt the archive from pristine afterwards** and discarded your member. See the ordering rule in [generated-assets.md §2](generated-assets.md#2-two-generators-one-archive--the-ordering-rule).
+
+**Fix.** Re-run the pipeline in the declared order on this machine. **Gate:** run every generator's `--check` as the *first command* of any session that touches assets; it is the only thing that distinguishes "this checkout is current" from "this checkout looks current".
+
+## 15. F13 One field is blank for some records, different ones each session
+
+**(A)** A display field is empty for a handful of records; which ones changes between sessions; a different screen shows the same data correctly. It reads as a font, encoding or layout bug, and it is none of those.
+
+Cause: **you deleted a byte that the guest scans for when computing that field's length** — an unbounded, NUL-blind scan. The scan now runs off the allocation into the heap and stops at the first matching byte it finds, so the result depends on allocation history: a length that looks normal, or a negative one that draws nothing.
+
+**(B)** In the reference port an edit removed a separator byte along with the sentence after it and shipped green; the reports arrived two session-blocks later, after unrelated changes moved the heap around.
+
+**Fix.** Restore the byte in the data — not in the code. The unbounded idiom is normally duplicated across every screen that shows the field (**(B)** eight sites, two arms each), so one data byte fixes all of them and a code patch would need every site. Then make the writer enforce it: present, **not at index 0**, on every output record. Full mechanism and method: [record-formats.md §3](record-formats.md#3-the-safety-theorem-for-length-prefixed-records).
+
+## 16. How to reproduce a fault deliberately
 
 **(A)** The whole table above was produced this way, and you should do the same when a new fault appears: start from a **known-good** archive and change exactly one thing.
 

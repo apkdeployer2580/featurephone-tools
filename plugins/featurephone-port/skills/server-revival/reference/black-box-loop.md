@@ -18,6 +18,9 @@ the client stays connected**.
 - [Scripted device runs](#scripted-device-runs)
 - [★ The refutation log](#-the-refutation-log)
 - [Worked refutations (B)](#worked-refutations-b)
+- [★ Preserve refuted CANDIDATE fixes, not only refuted claims](#-preserve-refuted-candidate-fixes-not-only-refuted-claims)
+- [When a diagnosis is refuted, label what survives](#when-a-diagnosis-is-refuted-label-what-survives)
+- [Refutation without a device](#refutation-without-a-device)
 - [Confidence discipline](#confidence-discipline)
 - [Operational traps](#operational-traps)
 
@@ -186,8 +189,9 @@ NOW:     the encoder substitutes a single space; conformance assertion `enc_noti
 
 ## Worked refutations (B)
 
-Seven real ones from the reference port. They are here as **shapes of error**, not as facts about
-your title — read them for the *kind* of mistake each represents.
+Nine real ones from the reference port. They are here as **shapes of error**, not as facts about
+your title — read them for the *kind* of mistake each represents. One of them is a refutation that
+was itself later refuted, which is the most useful row in the table.
 
 | static claim | device reality | the lesson |
 |---|---|---|
@@ -196,8 +200,105 @@ your title — read them for the *kind* of mistake each represents.
 | "this routine opens a secondary socket" | it is a **paged text-box builder**; no secondary socket exists | a function near network code is not network code |
 | "the backup ack is a toast" | the toast made the client **cleanly close the socket**; the correct ack is a commit-ack, after which the client sends its next request and advances | dismissing a modal ≠ advancing a state machine |
 | "this item category contains 16 entries" | those bytes were **ciphertext noise** in an encrypted resource member; decrypted, the category is empty | never parse an encrypted member as if it were plaintext |
-| "the login sequencer force-sends a restore for slot 0" | **never observed on a real client**; the working discriminator is "did *this connection* upload a backup?" | a code path that exists is not a code path that runs |
+| "the login sequencer force-sends a restore for slot 0" | ~~never observed on a real client~~ — **it does, on every login whose first slot is empty** (see the correction below) | absence from a short capture is not evidence a path does not run |
 | "a 16-entry array means expansion is impossible" | 16 is **one page**; capacity is a byte the server writes | a client array bound is not a feature bound |
+| "padding a short list reply blanks the client's stale rows" | storage filled with **one item the player never owned** — an all-zero row is a valid item identifier | "the handler memsets that array" proves the array is dirty, **not** that stale rows are drawn |
+| "writing zero into a row's count makes the row not exist" | a **visible, pickable, eternally mergeable ghost row** — dug to the end and dropped | check the client's *painter* and its *merge scanner* before choosing any sentinel |
+
+> **REFUTED — a refutation that was itself refuted.** *Previously recorded here as a device
+> finding:* the login sequencer's forced save-restore for the first slot is a code path that exists
+> and never runs; it was **never observed on a real client**, so the working discriminator for a
+> genuine restore is *"did **this connection** upload a backup?"*.
+> **Refuted by:** production server logs. The login **does** send that frame, and it is **byte
+> identical** to a user-initiated restore — the same seven bytes, on the same connection, annotated
+> in the log once as each. Live characters were overwritten as a result, because the client's restore
+> handler has no occupancy check.
+> **Why the wrong reading was attractive:** it was an honest device observation. The capture was
+> short, and the path only fires for a player whose **first slot is empty** — a condition no
+> developer's test account is in for long. "I watched and it did not happen" is exactly what a
+> conditional path looks like from outside its condition.
+> **Actual mechanism and correction:** the discriminator is not "did this connection upload a
+> backup?" but **has the login finalised yet?** — and even that is not sufficient on its own, because
+> **no server can tell the two senders apart**. The destructive request must additionally be
+> neutralised in the host's own **send** path, by substituting a benign sibling request when the
+> host's record store says the slot is occupied. (The *shape* recommended in
+> [deploy.md](deploy.md) — prefer a state-derived guard to a flag — is still right in general. This
+> particular state-derived guard is not, because the state it reads is on the wrong side of the
+> wire.) See [reply-re.md](reply-re.md)'s save-restore row,
+> [refusals-and-holds.md](refusals-and-holds.md) §9 and §11, and
+> `${CLAUDE_PLUGIN_ROOT}/skills/save-integrity/reference/loss-mechanisms.md` §8.
+> **Consequence if carried forward:** a server built on that discriminator answers the login's copy
+> and overwrites a live character, and the report arrives as *"story, equipment and items all
+> reset"* — with nothing wrong-looking in the log.
+
+**★ The transferable rule: `⚠ never observed` is a note about your capture, not about the client.**
+Write it as *"not observed in n sessions, all with a non-empty first slot"*, and it stays honest.
+`${CLAUDE_PLUGIN_ROOT}/shared/investigation-discipline.md` §7 is the general form.
+
+## ★ Preserve refuted CANDIDATE fixes, not only refuted claims
+
+**(A)** The refutation log usually collects wrong *claims*. It should also collect **fixes you
+designed, investigated to the end, and did not ship** — with the facts that killed them. A dropped
+candidate is invisible in the diff, so without a note the next person (usually you) re-invents it,
+re-investigates it, and pays for it twice. Record: the candidate, the four-or-so facts that killed
+it, and **what shipped instead**.
+
+**(B) The worked one.** To stop a client-side duplicate delivery, the candidate was to write **zero**
+into the delivered row's count field so the row would "not exist". Four facts killed it, all read out
+of the client:
+
+1. the grant routine **claims the destination slot before it reads the count**, so the row is
+   allocated whatever the count says;
+2. the grid painter prints the number with a **bare integer format and no zero gate**, so a zero row
+   is drawn like any other;
+3. the merge scanner filters only on *"not nearly full"*, so a zero row becomes an **eternal merge
+   target**;
+4. the only value the client actually special-cases is **minus one**, and only to omit an entry from
+   one acquisition list.
+
+Net effect of the candidate: a permanent, visible, pickable ghost row. **What shipped instead** was
+to stop the client's delivery leg from being sent at all
+([client-fidelity.md](client-fidelity.md) §7).
+
+**★ And record the reading error that made it look right.** The same investigation had misread a
+nearby load as "an early return when the count is zero". The base register there is the **received
+packet**, so that byte is the reply **status**, not a count — and that correction is the premise the
+shipped fix stands on. Register provenance is worth stating explicitly whenever an offset is quoted:
+*offset into what?*
+
+## When a diagnosis is refuted, label what survives
+
+**(A)** When the cause turns out to be somewhere else, you are left holding changes made under the
+old theory. Do not silently keep them and do not reflexively revert them. **Classify each one in the
+same note as the refutation**: *kept as hygiene* · *reverted* · *superseded by the real fix*.
+Unlabelled survivors become folklore — the next person cites the leftover as the cure and the real
+cause stays unfound.
+
+**(B)** The reference port raised a server idle budget to fix "the app hangs after returning from
+the background". Production logs then showed the connections being reset by the **platform** within
+seconds, far inside the raised budget: the change could not have been the fix. It was **kept and
+explicitly relabelled** *"correct hygiene, not the fix for this bug"* — and **paired with
+keep-alive**, because a raised idle budget without keep-alive just leaks file descriptors for longer.
+The real cause and its repair are in [socket-layer.md](socket-layer.md).
+
+## Refutation without a device
+
+**(A)** A device is the strongest oracle, not the only one. Two techniques refute claims with nothing
+plugged in:
+
+* **Adversarial re-derivation.** Take a shipped claim and re-derive it from the artifact *as if
+  trying to break it* — read the client's actual routine rather than your model of it, and look for
+  the input that separates the two. The most expensive class of bug in an in-process engine (the host
+  authorising a quantity the client then destroys) was found this way, from disassembly plus a
+  re-derivation against the engine already in production.
+* **Settle a disagreement arithmetically rather than by vote.** Where two readings of the same
+  instruction disagree — common when a call's target arrives through a literal pool and a register
+  veneer, so no branch-and-link call graph exists at all — compute the target address by hand. The
+  arithmetic is the tiebreaker, and it is cheap. Full treatment:
+  `${CLAUDE_PLUGIN_ROOT}/shared/investigation-discipline.md` §8.
+
+Both belong in the refutation log with the same format as a device finding; only the **CONFIRMED /
+INFERRED** axis changes.
 
 ## Confidence discipline
 

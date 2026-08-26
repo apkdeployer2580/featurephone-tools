@@ -1,6 +1,6 @@
 ---
 name: port-triage
-description: Orients and routes a feature-phone game port — a WIPI (KTF or LGT), SKT/SKVM, or J2ME MIDlet .jar remade as a native Android app on a forked wie emulator core. Classifies the dump from its magic entry, decides whether the guest is AOT-compiled ARM or JVM bytecode, triages the boot state, lists what the user must supply, and dispatches to the archive-prep, emulator-core, guest-re, android-host, server-revival and port-shipping skills in pipeline order. Use when the user mentions porting, remaking, reviving, emulating or re-hosting a feature-phone, WIPI, KTF, LGT, SKT, SKVM, MIDP or J2ME game; names a .jar, .jad, .kdp, __adf__, app_info, .msd or carrier download package; asks where to start on an emulator-backed remake; asks which phase of a port owns a symptom they are seeing; or asks what has to be installed before starting.
+description: Orients and routes a feature-phone game port — a WIPI (KTF or LGT), SKT/SKVM, or J2ME MIDlet .jar remade as a native Android app on a forked wie emulator core. Classifies the dump from its magic entry, decides whether the guest is AOT-compiled ARM or JVM bytecode, triages the boot state, decides whether the title needs a hosted server, an in-process engine or nothing, lists what the user must supply, and dispatches to the archive-prep, emulator-core, guest-re, android-host, server-revival, save-integrity and port-shipping skills in pipeline order. Use when the user mentions porting, remaking, reviving, emulating or re-hosting a feature-phone, WIPI, KTF, LGT, SKT, SKVM, MIDP or J2ME game; names a .jar, .jad, .kdp, __adf__, app_info, .msd or carrier download package; asks where to start on an emulator-backed remake; asks which phase of a port owns a symptom, a lost save or a crash they are seeing; or asks what has to be installed before starting.
 license: MIT
 ---
 
@@ -68,8 +68,16 @@ never an eyeballed screenshot. Match the first symptom you actually see.
 | SIGSEGV, "stack pointer is not in a rw map", two addresses alternating in the backtrace | 6 | `emulator-core` |
 | stutters in proportion to how much is on screen | 6 | `emulator-core` |
 | boots and renders | 7 | `guest-re` |
+| starts, shows the title, **then** dies — allocation failure with a negative size | 2 | `archive-prep` — a data member and a guest constant disagree; run every generator's `--check` |
+| **a character, a slot or a save is gone**; one save overwrote another; saves stopped persisting | 11a | **`save-integrity` — before anything else** |
 
 Merged symptom→cause table for every phase: `${CLAUDE_PLUGIN_ROOT}/shared/fault-dictionary.md`.
+
+★ **A save-loss report pre-empts the queue.** It is the one class of bug where every hour you spend
+reproducing costs the player something they cannot get back, and the first two questions are
+neither "what happened" nor "which code": **which build is on the reporting device**
+(`${CLAUDE_PLUGIN_ROOT}/shared/device-verification.md`), and **is there a vault generation to
+restore from** (`/featurephone-port:save-integrity`). Ask both before reading any code.
 
 ## 4. Does it need network?
 
@@ -79,9 +87,21 @@ Decide from evidence, not from the genre. Dump the guest's strings and look for 
 literal and the platform's `connect` call site (titles of this era carry their own `inet_addr`
 parser, so the address survives as plain text in the image).
 
-- Found → chapters **15–17** apply → `server-revival`.
-- Not found → skip 15–17 entirely. Most titles are offline and the protocol vocabulary is pure
-  overhead for them.
+**There are three outcomes, not two**, and the middle one is the common case for a single-player
+title with online conveniences. Getting it wrong commits you to running a server forever for a game
+that never needed one.
+
+| what you found | what it commits you to |
+|---|---|
+| **no socket at all** | skip chapters 15–17 entirely. Most titles are offline and the protocol vocabulary is pure overhead. |
+| **a socket, and nobody will host a server** | chapters 15–16 apply **in full** — socket layer, framing, request discovery, reply RE — but the deliverable is an **in-process engine**, not a service. Skip TLS, pinning, the account store, deployment and the threat model. → `server-revival`, Phases 0–5 plus [reference/in-process-engine.md](../server-revival/reference/in-process-engine.md) |
+| **a socket, and the title is genuinely multiplayer / you will host** | chapters **15–17** in full → `server-revival` |
+
+⚠ **(B)** The reference port walked the middle row the long way round, and that order was right: it
+built and deployed a replacement server *because that was how the protocol got learned on real
+hardware*, then reimplemented the protocol in-process and made the engine the shipping default. Read
+"deployment is optional" as "optional **as a destination**", not as "skip the phase that teaches you
+the protocol".
 
 ## 5. Routing table
 
@@ -91,20 +111,32 @@ parser, so the address survives as plain text in the image).
 | anything inside the vendored emulator core or CPU crate | `/featurephone-port:emulator-core` |
 | finding an address, patching Thumb, running or extending the probe | `/featurephone-port:guest-re` |
 | touch HUD, layout editor, blit, CJK glyphs, storage, on-device config | `/featurephone-port:android-host` |
-| sockets, packets, replacement server, TLS and pinning | `/featurephone-port:server-revival` |
+| sockets, packets, replacement server or in-process engine, TLS and pinning | `/featurephone-port:server-revival` |
+| **a save, slot or character was lost, overwritten or stopped persisting; a record write needs a guard; a backup, vault, restore or build recall** | **`/featurephone-port:save-integrity`** |
 | scaffold, build, sign, version, release, publish audit | `/featurephone-port:port-shipping` |
+
+`save-integrity` is the skill that owns a decision no phase skill does: **an occupied character
+record is only ever replaced by its own character.** Route there the moment a report contains the
+word "gone", and route there *before* writing any code that deletes, truncates or rewrites a record.
 
 ## 6. Where you actually are
 
-The pipeline is 20 chapters, each with an entry state and an exit criterion you do not advance
-without: [reference/pipeline.md](reference/pipeline.md).
+The pipeline is 20 numbered chapters plus **11a** (save integrity) and **20** (the play-feedback
+loop), each with an entry state and an exit criterion you do not advance without:
+[reference/pipeline.md](reference/pipeline.md).
 
 **A returning user is almost never at chapter 0.** Real work loops:
 
+- **18 → a play report → 9 or 13 → 18** — the dominant loop of a live port, and the one whose
+  *first* step goes wrong: identify the build installed on the **reporting** device before
+  investigating anything (`${CLAUDE_PLUGIN_ROOT}/shared/device-verification.md`).
 - **7 ↔ 9 ↔ 13** — pin the address model, prove offsets, patch and verify on a device. Every new
   guest-side feature re-enters at 9, never at 0.
 - **12 ↔ 14** — control placement and differential verification of host reimplementations.
-- **2** alone, months later, whenever in-jar text or tables must be rewritten.
+- **11a** — every new save, backup or restore feature, every new screen that can save, and every
+  guest finding that touches the slot index.
+- **2** alone, months later, whenever in-jar text or tables must be rewritten — or whenever *this
+  machine's* generated archive has fallen behind the repository.
 - **16 ↔ 17** while a reply table is being learned black-box against a live client.
 
 Ask which exit criteria already hold, then enter at the first one that does not.

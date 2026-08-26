@@ -4,6 +4,13 @@ Four layers, one file each, and the separation **is** the design. The whole poin
 layer carrying the protocol semantics has no sockets in it, so it can be tested exhaustively
 without a device, without a network and without an event loop.
 
+**Read this even if you intend to retire the server.** The layering below is also what makes the
+in-process engine possible: the protocol-semantics layer is the only one that has to survive, and
+its `handle(request_bytes) -> list[reply_bytes]` signature is **the portable artifact** — the thing
+you carry, in whatever language the host is written in, when the wire goes away
+([in-process-engine.md](in-process-engine.md)). A server whose semantics are tangled into its event
+loop cannot be retired; it can only be kept running.
+
 ## Contents
 
 - [Layering](#layering)
@@ -15,6 +22,7 @@ without a device, without a network and without an event loop.
 - [Range-check wire bytes AT the store boundary](#range-check-wire-bytes-at-the-store-boundary)
 - [Limits, all derived from measurement](#limits-all-derived-from-measurement)
 - [Features the original protocol never named](#features-the-original-protocol-never-named)
+- [★ And features it named that you should retire](#-and-features-it-named-that-you-should-retire)
 - [Known-weak spots to fix before scale](#known-weak-spots-to-fix-before-scale)
 - [The economy is client-trusted — say so above the fold](#the-economy-is-client-trusted)
 
@@ -50,8 +58,9 @@ Everything good downstream follows from this one signature:
 * **A reply-table experiment and a handler implementation are interchangeable**, because both
   produce `list[bytes]` for a request — so a black-box finding is promoted to code without
   restructuring anything.
-* **Refusal is expressible.** Returning `[]` means "say nothing", which is the safe failure mode
-  (see [reply-re.md](reply-re.md)).
+* **Refusal is expressible.** Returning `[]` means "say nothing" and returning a failure frame means
+  "no, and here is why" — both are just values, so both are testable. Which of the two is *correct*
+  is a property of the client, not of this signature: see the correction below.
 
 Resist adding `writer` or `loop` parameters. If a handler needs to do something asynchronous,
 return a reply and queue the work outside.
@@ -91,7 +100,7 @@ Certificate strategy is in [deploy.md](deploy.md).
 
 | control | why it exists |
 |---|---|
-| **idle timeout** | the server never writes unprompted, so a dropped NAT mapping produces **no RST** and the fd leaks forever. Derive the value from measured heartbeat gaps. |
+| **idle timeout** | **Hygiene, and only hygiene.** The server never writes unprompted, so a dropped NAT mapping produces **no RST** and the fd leaks forever. Derive the value from measured heartbeat gaps — **and pair it with TCP keep-alive**, because raising the budget without keep-alive just leaks file descriptors for longer. See the warning below. |
 | **total session cap** | bounds memory and fd usage on a small VPS |
 | **per-IP session cap** | the game opens *one* socket per install; several from one address is abnormal. Do not set it to 1 — carrier NAT puts many real players behind one address. |
 | **frame rate limit over a window** | legitimate bursts (opening a list screen is a handful of frames) pass; floods do not |
@@ -101,6 +110,20 @@ invokes your connection callback, so a per-IP session cap cannot protect you fro
 handshake-CPU flood — the cheapest DoS available against a small box. If that matters, put an
 accept-level token bucket in front of the TLS wrapper, or terminate TLS behind something that has
 one. See [threat-model.md](threat-model.md).
+
+**★ Two things the idle timeout is not.**
+
+* **It is not the fix for "the app hangs after returning from the background".** That symptom has no
+  network cause at all: the platform resets a cached app's sockets **within seconds**, far inside any
+  sane budget, so no budget change can address it. The reference port made exactly this
+  misattribution, raised the budget, and then kept the change **relabelled as hygiene** once the real
+  cause was found. Detection and repair belong to the host:
+  [socket-layer.md](socket-layer.md).
+* **It is not a template for a HOST-side stuck-connection timer.** Because the server deliberately
+  does not answer heartbeats, a host timer keyed on "no bytes received" fires on perfectly healthy
+  connections and disconnects players in the middle of ordinary field play — heartbeats are all a
+  healthy idle client sends. A host watchdog keys on an **unanswered request**
+  ([socket-layer.md](socket-layer.md)).
 
 ## Session and identity
 
@@ -113,8 +136,21 @@ Four rules that are correct regardless of which model you choose:
 
 1. **Gate every account-scoped operation on "has this session logged in?"** — one
    `_require_account()` at the top of each handler.
-2. **Refusal is silence.** Return `[]`. The guest treats no-reply as an incomplete request and
-   times out cleanly; every crash in the refutation log came from a malformed reply.
+2. **Refusal is a reply, not silence** — a failure status carrying its reason text in the same
+   frame. Return `[]` only for messages the client demonstrably ignores, such as its heartbeat.
+
+   > **REFUTED.** *Previously documented here:* refusal is silence — return `[]`, because the guest
+   > treats no-reply as an incomplete request and times out cleanly, and every crash in the refutation
+   > log came from a malformed reply.
+   > **Refuted by:** the client's own wait-state disassembly plus device sessions. Every screen in the
+   > online module is released by a reply frame and by nothing else, with **no timeout behind any of
+   > them**, so an unanswered request is an unrecoverable hang rather than a clean timeout.
+   > **Why it was attractive:** it is true of the *transport*, and the malformed-reply crashes were
+   > real — the inference "therefore say nothing" silently assumes a deadline nobody looked for.
+   > **Consequence if carried forward:** the first refusal a real player triggers wedges the game.
+   > Full account, including why a *bare status-only* failure ack is itself a crash primitive:
+   > [reply-re.md](reply-re.md) encoder rule 5 and
+   > [refusals-and-holds.md](refusals-and-holds.md) §1–§3.
 3. **One account per connection.** Re-sending the *same* identity is a legitimate retry and must
    succeed. Re-binding the session to a *different* identity is refused — otherwise one socket is
    an enumeration tool.
@@ -200,6 +236,29 @@ And the counterpart constraint: **you do not invent items.** The item database l
 own archive resources; the wire carries only identifiers and the client resolves names and effects
 itself. A "shop" is a list of records that re-lists things the game already ships.
 
+## ★ And features it named that you should retire
+
+**(A)** The additive move above is the obvious one. The **subtractive** move is larger and is the one
+porters miss: you can **retire** a feature the original protocol offered — permanently, from inside
+your own handler — and you do it **by the request the client sends**, never by inferring what the
+player meant.
+
+This works because of an asymmetry that is common and easy to check: a control that offers two
+outcomes usually has one half that **sends a frame** and one half that is **purely local**. Refuse at
+the point the frame arrives and the surviving half never touches your code at all.
+
+**(B)** In the reference port the retired feature is the character-restore reply — it overwrites live
+characters, and its request is byte-identical to a routine login sub-request, so *no server-side
+condition can gate it correctly*. The engine answers it with a permanent unavailable-feature refusal
+and never sends a character, **even when a backup exists**; a selftest pins that exception. The
+destructive-local half of the same key kept working with no code written for it.
+
+The failed alternative is worth as much as the fix: an attempt to tell the two halves apart by
+reading guest memory produced an occupancy array that reported **all slots occupied for a screen
+showing one character**, and the repository now records *do not look for that anchor again*. Full
+procedure, the refutation and the replacement capability:
+[refusals-and-holds.md](refusals-and-holds.md) §8.
+
 ## Known-weak spots to fix before scale
 
 Carried honestly from the reference implementation, because a reader will otherwise copy them:
@@ -220,6 +279,12 @@ the commit request back verbatim** (a reflection primitive and an item-duplicati
 deposited item records **unvalidated**, so any item can be forged; and grants bonuses keyed off
 client-chosen bytes.
 
+**★ And nobody could say why the echo reads as success.** The client gates on **one byte** of the
+echoed key — the item index — and the echo works only because no catalogue row has index zero. Add a
+row with index `0` and every purchase silently becomes a failure. Before you keep an echo, name the
+byte the client tests and prove it cannot take the failure value; the method is in
+[reply-re.md](reply-re.md), "which byte does the client actually test?".
+
 For a private server hosting your own character, that is a deliberate and reasonable choice. On a
 **shared** server it means one player mints items into everyone's economy. If your server is
 public:
@@ -227,5 +292,6 @@ public:
 1. Validate deposited records against the game's own item tables (which you can read from the
    archive) before storing them.
 2. Make purchases actually debit, server-side, before approving.
-3. Never echo a request as a reply. Construct the reply from server state.
+3. Never echo a request as a reply. Construct the reply from server state. (If you keep one anyway,
+   you owe the reader the byte-level reason it reads as success.)
 4. Then say, in the README, which of these you did and which you did not.
