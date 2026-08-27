@@ -58,8 +58,9 @@ play, menu/panel, dialogue, shop or list, battle. Do not take this measurement o
 **(B)** Method: a headless probe driven to a real field map with the draw-call trace and the work
 gauge both on. Result: **12 platform draw calls per frame and zero image blits**, against **2.46 M
 guest instructions per frame** — about 123 M inst/s to hold real time. The same title's menu and
-panel screens were the opposite case: **1,650–2,450 small fill-rect calls per frame**, 5–7 fps on a
-2018-era low-end phone with roughly 112 ms of host work per frame.
+panel screens were the opposite case: **1,650–2,450 small fill-rect calls per frame**, with the
+worst single screen — a network modal — at roughly **112 ms of host work per frame** on a 2018-era
+low-end phone.
 
 > **REFUTED.**
 > **Previously documented:** "the platform graphics path costs call count × full screen; on a title
@@ -161,9 +162,15 @@ cases were implemented; the 0 % cases were deliberately left on the fallback (§
 
 ## 6. The decision rule: pixels per call must justify the trap round trip
 
-**(A)** A hook costs one trap in and one jump out, per call. Below roughly **100 pixels per call**
-that round trip is not justified: either drop the candidate, or move the hook site *outward* until
-one call covers more pixels (§7). The shape you want is **rare calls each doing a lot of work**;
+**(A)** A hook costs one trap in and one jump out, per call, so the gate is a *ratio*: your host's
+trap round trip over your guest's interpreted per-pixel cost. Measure both, in the same unit, rather
+than importing a number: §5's Phase 0 hook declines unconditionally, so the **host-time delta with it
+installed and removed** is the round trip; §4's per-pixel figures are in *guest instructions*, so
+convert them through your interpreter's measured instructions per second.
+Below the gate, either drop the candidate or move the hook site *outward* until one call covers more
+pixels (§7). **(B)** The reference port never ran that arithmetic; it carried **~100 pixels per call**
+as a judgement recorded at the time, which is why the next line cites the threshold rather than a
+derivation. The shape you want is **rare calls each doing a lot of work**;
 §16 is the measurement that proves you got it rather than trading interpretation for trap overhead.
 
 **(B)** 331 pixels/call cleared a threshold recorded at the time as "under ~100 pixels per call the

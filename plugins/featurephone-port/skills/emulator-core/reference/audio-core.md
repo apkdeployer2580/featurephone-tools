@@ -325,7 +325,15 @@ on the emulator thread, in a single frame. Symptom: a burst of noise plus a fram
 resume, which nobody attributes to the sequencer. **Rebase:** when the deficit passes a threshold,
 advance the start time by **exactly the deficit**, so the current event is due now and every later
 event keeps its original spacing. That is what a real sequencer does with a stalled clock; skipping
-ahead silently and replaying the backlog are both audible. **(B)** Threshold 250 ms.
+ahead silently and replaying the backlog are both audible.
+
+**Deriving the threshold (A).** It separates *ordinary* jitter between playback polls from *the host
+stopped ticking*, so measure the poll-to-poll interval with the app in the foreground under load — a
+hitching frame is the worst ordinary case — and set it just above that. Both sides are wrong out loud:
+below ordinary jitter it rebases on every hitch and the song's spacing drifts; above a real stall it
+never fires and the resume burst of §19's symptom table comes back. **(B)** The reference port shipped
+**250 ms**. **(C) Do not copy it** — it is a property of your host's poll cadence, and it is **not**
+the same 250 as §13's grace, which is a different quantity that happens to share a value.
 
 ⛔ **Compute elapsed time with saturating subtraction.** A wall clock can step *backwards* (an NTP
 correction), and a raw instant difference underflows into an astronomically large "elapsed" that

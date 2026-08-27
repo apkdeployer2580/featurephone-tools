@@ -114,7 +114,19 @@ glyphs × 22 bytes in a **16 × 11** cell, split **160 / 88 / 112** across the t
 
 ## 3. Recover composition from the guest's own renderer
 
-**(A)** For a syllabic script, read the guest's composition routine instruction by instruction. The
+**(A) Settle first whether this font composes at all.** The axis is not "syllabic" — it is
+**composed from components** versus **indexed whole**, and §2's loader read has already answered
+it: a composing font arrives as several banks plus a remap and variant tables, a non-composing one
+as a single bank the codepage index addresses directly. ⚠ A syllabary such as kana, and
+ideographic sets generally, are normally indexed whole; the reference port exercised only the
+composed case, and
+[reference-implementation.md](../../../shared/reference-implementation.md) lists non-Korean text
+encodings among what it does not cover. If there is one bank and no remap there is nothing in this
+section to read — no composition routine, no variant tables to omit, and no analogue of the two
+shape assertions below. Verify that bank instead by spot-checking host-drawn text against the
+game's own rendering of the same string, and go to §4.
+
+**(A) When it does compose,** read the guest's composition routine instruction by instruction. The
 shape is nearly always this:
 
 ```
@@ -456,7 +468,7 @@ this leak is invisible to everyone who is looking for a `.zip`.
 - [ ] Every slice comes from a loader copy, and each length assertion **names that copy's offset**.
 - [ ] File order versus destination-address order was checked explicitly, not assumed.
 - [ ] Bank sizes have a second derivation from the renderer's strides.
-- [ ] Composition reproduces the guest's routine, variant tables included, with both shape assertions.
+- [ ] Whether the font composes at all was settled from §2's loader read; if it composes, the routine is reproduced with variant tables and both shape assertions.
 - [ ] The font is generated **source**, with per-member exact-length assertions and a `--check` mode.
 - [ ] Cap height and baseline drop are measured constants; the drop's descender limit is written down.
 - [ ] Host-invented chrome scales by integers; a replica uses the fractional path.

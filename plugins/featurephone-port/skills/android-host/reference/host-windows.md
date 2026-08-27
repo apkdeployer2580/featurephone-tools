@@ -220,7 +220,7 @@ real device resolution caught the off-by-one.
 
 **(B)** The upscale is usually **fractional** — a 496x240 logical framebuffer into 1080 device rows
 is x4.5 — which is why a replica's text needs a fractional glyph path rather than an integer one
-([game-native-ui.md §6](game-native-ui.md#6-integer-scale-for-host-chrome-fractional-scale-for-a-replica)).
+([game-native-ui.md §6](game-native-ui.md#6-integer-scale-for-chrome-fractional-for-a-replica)).
 
 **(A)** Divide touch coordinates at exactly **one** entry point. That single property is also the
 precondition for rendering into a smaller buffer later, which is the largest host-side saving
@@ -257,7 +257,7 @@ question exactly on the row that is going to refuse you (§1).
 
 Two rules that live next door: the icon and caret columns are reserved on **every** row so nothing
 jitters as the selection moves
-([game-native-ui.md §16](game-native-ui.md#16-reserve-the-icon-and-caret-columns-on-every-row)), and
+([game-native-ui.md §16](game-native-ui.md#16-reserve-the-icon-and-caret-columns)), and
 the body colour comes from the game's window **kind**
 ([game-native-ui.md §12](game-native-ui.md#12-window-kind-decides-the-body)).
 
@@ -281,9 +281,9 @@ dependency-free test can include are in
 | Making a window smaller silently re-breaks a readability fix | height was shrunk too; row height sets the font scale | §7 |
 | A host window lines up with the game's on your phone and misses on the next | geometry stored in window pixels instead of guest logical pixels | §8 |
 | The leftmost column of a small tap target is dead | margin recomputed symmetrically instead of anchoring to the real edge | §8 |
-| Replica text is one visible size step smaller than the game's | integer-only glyph scale against a fractional guest upscale | §8, [game-native-ui.md §6](game-native-ui.md#6-integer-scale-for-host-chrome-fractional-scale-for-a-replica) |
+| Replica text is one visible size step smaller than the game's | integer-only glyph scale against a fractional guest upscale | §8, [game-native-ui.md §6](game-native-ui.md#6-integer-scale-for-chrome-fractional-for-a-replica) |
 | Players cannot tell which row is selected | one cue, and a ring that became a hairline as the window grew | §9 |
-| Rows shift sideways as the selection moves | icon/caret column not reserved on every row | [game-native-ui.md §16](game-native-ui.md#16-reserve-the-icon-and-caret-columns-on-every-row) |
+| Rows shift sideways as the selection moves | icon/caret column not reserved on every row | [game-native-ui.md §16](game-native-ui.md#16-reserve-the-icon-and-caret-columns) |
 | "Is this item type just not supported?" arrives as a design question | a refusal upstream of the row builder — an absent row, not a disabled one | §1 |
 
 ## 11. Checklist

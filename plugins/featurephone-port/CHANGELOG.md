@@ -27,12 +27,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > tuning, and documentation fixes. The plugin `name` itself is effectively immutable — users
 > reference it in `enabledPlugins` and in every `/plugin install` line.
 
-## [Unreleased]
+## [0.2.1] - 2026-08-27
 
-Adversarial verification of 0.2.0 — the one item the 0.2.0 handoff left open — was run and its
-first tranche of corrections applied. **Not yet released:** bump `version` in both manifests and
-move this block under a `## [0.2.1]` heading when the rest of the tranche lands. Users keep 0.2.0
-until that happens, because the plugin is cached by its version string.
+Adversarial verification of 0.2.0 — the one item the 0.2.0 handoff left open — was run, and this
+release carries its corrections. Two workflows, 43 and 45 agents, checked whether 0.2.0 is *correct*
+and whether it *transfers to a title nobody here has ported*; the second answered
+`transferable-with-gaps` at 93 % document coverage. A third pass then re-verified the work list
+itself before applying it, and dropped ten of its items (last section below).
+
+No skill was added or removed and no tool changed, so this is a PATCH: corrections, sharper
+evidence tags, and one chapter that gained the commands it had always promised.
 
 ### Fixed — save-data doctrine (both would have cost a player their character)
 
@@ -107,6 +111,130 @@ statements about the bytecode path were corrected.
 and `prerequisites.md`'s "you must supply" list did not mention one. The spec is complete, so it is
 now named as a supplied prerequisite in all three places, with the pointer to its specification.
 No default URL was invented: a default that 404s is worse than a clear refusal.
+
+### Fixed — four claims the verification proved false
+
+Each of these was selected as high-consequence, handed to a skeptic told to kill it, and survived as
+a real defect. The measurements underneath them were re-derived and all of them held; what failed was
+a word attached to a measurement, or an outcome attached to the wrong cause.
+
+- `android-host/reference/audio-mixing.md` §9 — the six ducking dB figures re-derive exactly from the
+  shipped constants, but **"bit-unchanged"** does not describe the output. The envelope is applied on
+  every frame, so the moment any effect is queued the music bus is scaled regardless of whether the
+  limiter was ever engaged; "because the limiter was idle there" was a non-sequitur. The figures are
+  the *effect's delivered level*, and the property is bit-exact only at default settings, where the
+  sum never reaches the knee. Re-scoped at all five sites, including the fault dictionary's row —
+  which is the copy a porter reaches from a symptom.
+- `guest-re/reference/multi-build.md` §8.1 — *"so the feature had never once executed in the shipped
+  build"* belongs to a **different defect in the same feature** (a build gate, fixed sessions
+  earlier) and is contradicted by the reference port's own device log. The array-offset bug's outcome
+  is the opposite, and that opposition is the whole diagnostic value of the example: a build gate is
+  dead for **everyone**, a wrong array index is dead for **everyone but one**.
+- `save-integrity/reference/slot-identity.md` §11 — *"the serialiser has no source other than the
+  loaded character"* was tagged **(A)** and is an unverified inference: no file in the reference port
+  disassembles that function. It is the structural argument the whole redirect rests on, so it is
+  retagged and hedged rather than deleted, with the disassembly that would settle it named, and with
+  the unmeasured window between the record read and the deserialise written down. The same claim was
+  still shipping as paste-ready source in `policy-and-diagnostics.md` §3; that copy now carries the
+  same qualifier.
+- `shared/guarding-destructive-operations.md` §8 — the section shipped the reference port's
+  **prediction** as settled history and its **proposed, never-run** acceptance test as a worked
+  **(B)** example. The stub pair underneath it is host source and readable in full, so that half is
+  kept; the accumulation model is now marked ⚠ INFERRED with two named ways to settle it, and
+  `frame-pacing.md` §8, which owns the mechanism, says so too. Two symptom tables had been stating
+  the model's untested prediction as if it were a second player report.
+
+### Fixed — a misattribution, and a correction that was never applied
+
+- `emulator-core/reference/graphics-perf.md` §1 — the coda inside the `REFUTED` block attributed a
+  measurement to the wrong owner, and a "5–7 fps on a low-end phone" band that exists in no source
+  document had propagated to two other files. The host-side cost that does belong to this layer
+  replaces it, attributed to the specific screen that produced it.
+- `server-revival/reference/request-discovery.md` — carried a claim that 0.2.0 knew was wrong and
+  corrected **in a different file**, never here. Corrected in the short form the plugin uses for
+  this — one blockquote and a link — rather than a second copy of the full block. Separately, this
+  is the one file that *uses* the BL caller scan and the only one of eight carrying no warning that
+  the scan returns **zero for every real function** on an image whose cross-module calls go through a
+  register-indirect veneer; a porter on such an image would have concluded the title has no protocol.
+  Step 2 now says so before the reader runs it.
+
+### Changed — one owner per lesson
+
+Seven pairs of files were telling the same lesson twice, in a release that added 29 reference files
+at once. Each is now assigned an owner; the other side keeps its rule sentence and a link.
+`guarding-destructive-operations.md` §6 ↔ `investigation-discipline.md` §5; `crash-triage.md`
+§6–§8 ↔ `memory-footprint.md` (crash-triage was also the wrong side of a factual disagreement about
+the same session); `multi-build.md` §1 ↔ `build-keyed-anchors.md` §5; `graphics-perf.md` §1 ↔
+`guest-pixel-loops.md` §1; `investigation-discipline.md` §2.2 ↔ `evidence-standard.md` §4; and
+`virtual-clock.md` §5, which reported one measurement with numbers no other file supported.
+
+**No preserved refutation was deleted to achieve this.** Where a proposed deduplication would have
+removed the last copy of a `REFUTED` block or of a unique measured constant, it was refused instead —
+in three separate cases, one of them the plugin's only record of the audio give-up path.
+
+### Added — the crash-triage chapter now prints its commands
+
+`port-shipping/reference/crash-triage.md` is designated by `emulator-core/reference/diagnostics.md`
+§7 as the owner of "how to read each record", and `shared/fault-dictionary.md` routes the single most
+common field report a port receives — *"the app closes and comes back to the launcher"* — here three
+times. It named four device data sources and printed **no invocation for any of them**, in a plugin
+that prints literal commands elsewhere. None of the four is guessable: the exit history is an API-30+
+query, the tombstone directory is root-only on a user build so the crash-log store is the required
+route to the same dump, and the core-frequency check is a sysfs comparison. All four now print, as
+**(A)** platform facts using the house placeholders.
+
+The same chapter also reversed a belief 0.2.0 shipped — that the resident size printed on the kill
+record *explains* why the OS chose your process — without recording that it had ever been believed.
+It is measured after the platform has already trimmed the process, so it is routinely the *smallest*
+figure in a list whose ordinary exits are several times larger; the evidence is the neighbours, not
+the kill record. That now ships as a `REFUTED` block, because the wrong reading is maximally
+attractive: the number is printed immediately beside the reason code, which is how it survived a
+release.
+
+### Fixed — the strongest trust label in the plugin was platform-scoped
+
+`archive-prep/reference/archive-anatomy.md` §10 listed six things under **"Never (safe to rely on)"**
+of which two are false off KTF — and a third carried a per-platform qualifier, which teaches a reader
+that the unqualified ones were checked. 0.2.0 swept this same correction through five other skills
+and missed this one, so 0.2.0 created the contradiction. The list is now split into what never varies
+on any platform and what never varies *within* a platform, with the linked-ELF case named and the
+archive skill's own four-name table qualified to match.
+
+### Fixed — the minor batch
+
+Pipeline chapter 2's "Exit, all five" stated three KTF-shaped gates unconditionally, one of them
+unsatisfiable by construction on the plugin's other primary target; the chapter's own summary table
+said it twice more. The save payload's encryption is the game serialiser's doing, not a platform
+property, so the ownership signal derived from it is now title-specific with a settle-it-first step —
+and the plaintext branch it opens ships marked **INFERRED**, because no port has run it. A latched
+walk direction was tagged **(A)** though it is one title's direction handler, with three tuning
+constants and an axis ratio hanging off it; it is now a probe-run discriminator with three outcomes,
+and the symptom table that contradicted it is scoped to match. Bare tuning constants given the method
+that found them; **(B)**-tag discipline in `patching.md` §3a, `multi-build.md` §8.2 and
+`static-toolkit.md` §6. Five `save-integrity` minors, including a worked example that was not the
+width the mechanism requires and a log line that broke the rule printed beneath it. A cross-reference
+into the fault dictionary that pointed at the wrong section, and a repo-wide anchor sweep behind it:
+**95 files, 0 broken links**. One correction's owner reassigned to agree with the four files that
+already had it right. Font-coverage budgeting no longer reads as calibrated on one script.
+
+### Not applied — ten items from the verification's own work list
+
+The work list stated that every item on it had survived an independent skeptic. Re-checking each item
+against its verdict showed that was true for sixteen of them. Four had already been **refuted** in
+the original verification and were listed as work anyway; twenty-eight had never faced a skeptic at
+all, and putting them in front of one killed **six more**. All ten are dropped, and the reasons are
+worth more than the edits would have been:
+
+- Three would have deleted a preserved refutation or a unique measured constant.
+- Two rested on a claim of "no file cites the other" that a single grep disproves.
+- One would have shipped a statement that is **factually wrong about the emulator fork** — it
+  asserted a backend takes the first `.jar` entry, when that backend derives the jar name from the
+  descriptor's own basename, so the agreement it said did not exist, does.
+- Two invoked a house rule the plugin does not actually have.
+- Two rested on a truncated or paraphrased quotation of the text they were correcting.
+
+The on-screen D-pad chapter remains deliberately unwritten, per the audit's own recommendation that
+it be written against a real second title rather than before one.
 
 ## [0.2.0] - 2026-08-27
 

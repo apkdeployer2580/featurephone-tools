@@ -48,9 +48,23 @@ real title the answer **differs per screen class**:
 > your graphics layer never sees.
 >
 > **The headline is not wrong; it is screen-specific.** The same title's menu, panel and dialogue
-> screens issued **1,650–2,450 fill-rect calls per frame** and ran at **5–7 fps** on a low-end device —
-> squarely this file's problem. **Both answers occur in one title**, so count per screen class and
-> never generalise from one frame.
+> screens issued **1,650–2,450 fill-rect calls per frame**, and the worst single screen — a network
+> modal — cost roughly **112 ms of host work per frame** on a 2018-era low-end phone, most of it band
+> round-trips (**(B)** the per-frame host cost from the same census; the device share of the tick is
+> an on-device counter,
+> [frame-pacing.md §13](frame-pacing.md#13-reading-the-pacing-gauge-line)). That is squarely this file's problem. **Both answers occur in one title**, so count per
+> screen class and never generalise from one frame.
+>
+> **Note which number belongs to this layer: host cost per frame, not frame rate.** The residual few
+> fps on those same screens was the guest's own 244 ms frame timer with the host thread 78 % idle —
+> removing the round-trip *and* fixing the pacing left that screen's frame rate essentially where it
+> was, and the only thing that ever moved it further was overriding the guest's constant. See
+> [frame-pacing.md §15](frame-pacing.md#15-what-is-left-after-pacing-and-is-not-yours-to-fix).
+>
+> **(B)** Both counts above come from one census — a headless probe driven to each screen class with
+> the draw-call trace and the work gauge on; the method and the full breakdown are
+> [guest-pixel-loops.md §1](guest-pixel-loops.md#1-first-count-the-platform-draw-calls-per-frame--per-screen-class).
+> This block keeps them anyway, because the belief it refutes is this file's own opening sentence.
 
 **What the porter sees.** "Maps with a lot to render stutter compared to sparse maps." A
 full-screen effect hitches. A panel or dialogue screen is dramatically slower than the field. Frame

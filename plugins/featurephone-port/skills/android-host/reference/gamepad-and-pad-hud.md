@@ -148,7 +148,8 @@ means two latched directions and two release paths. **Skip the historical sample
 the motion event, too — a guest that latches one of four directions can only use the latest position.
 
 **(A) The physical stick goes through the SAME quantiser as the on-screen virtual stick** — same
-engage dead zone, same keep dead zone, same turn ratio, same keyup-old-then-keydown-new emission
+engage dead zone, same keep dead zone, the same turn ratio *where the guest latches*, same
+keyup-old-then-keydown-new emission
 ([input-and-hud.md](input-and-hud.md#5-the-joystick)). One quantiser, two producers; a second one is
 a second set of dead-zone constants to tune, a second place to get the guest's latch semantics wrong,
 and two devices that feel different for no nameable reason. Pin it: the reference port's pad tests

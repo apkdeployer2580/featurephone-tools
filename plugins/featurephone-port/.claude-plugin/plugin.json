@@ -1,6 +1,6 @@
 {
   "name": "featurephone-port",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Remake an original WIPI/KTF, LGT, SKT or J2ME feature-phone game .jar as a native Android app on a forked wie emulator core: archive repair, core porting, guest reverse engineering, multi-build support, the touch host layer, gamepad and audio, save-data integrity, dead-server revival or in-process retirement, signing and a publish audit.",
   "author": {
     "name": "apkdeployer2580",

@@ -101,9 +101,10 @@ feature had never been broken by the doubt.
 
 ### 2.2 A fifth field for the refutation block (A)
 
-Add **"Limits of the search that produced this"** to the four fields in
-[evidence-standard.md §4](evidence-standard.md#4-preserved-refutation-blocks). It is what turns a
-preserved refutation into a starting point rather than a warning sign.
+Every preserved refutation **should carry** **"Limits of the search that produced this"** — the last
+field of the template in [evidence-standard.md §4](evidence-standard.md#4-preserved-refutation-blocks), which
+owns the format. It is what turns a preserved refutation into a starting point rather than a warning
+sign.
 
 ---
 
@@ -173,18 +174,12 @@ writer must satisfy) would settle it; nothing has been run. Anchor tables:
 > **(A) When you find *the* path that produces an event, ask how many paths produce it. A guard on
 > one of two paths destroys data on the next build.**
 
-**(B)** A save-slot guard was rebuilt around the network path's load, which is observable because it
-emits a frame. The local start-game path loads the same records and emits nothing, so it was
-invisible to the host — and the same user's save was destroyed again one build later.
-
 **(A) How to enumerate: list the readers of the primitive, not the senders of the frame you happened
-to notice.** The fix observed the record read itself, which both paths perform, and was validated
-against the *existing* device trace with the counts stated: **(B)** 11 record-1 reads, all 11 loads,
-zero false positives, and writes provably never read — the create mode skips the record-1 seed.
-
-Before trusting any proxy signal, ask its **cardinality**: once per session, or once per action? That
-question and the guard's own shape belong to
-[guarding-destructive-operations.md](guarding-destructive-operations.md).
+to notice.** The reference port's worked case — one path observable because it emits a frame, one
+silent path loading the same records, the same save destroyed one build later — and the trace counts
+that validated the replacement signal are in
+[guarding-destructive-operations.md](guarding-destructive-operations.md) §6, with the proxy
+cardinality question that precedes it in §5.
 
 ---
 
@@ -376,7 +371,8 @@ reward was triggered by using it. The first version suppressed both symmetricall
 deleted the item's entire function**; adversarial verification caught it before it shipped. The
 symmetric suppression became correct only once the host reward had been retired. The write-up states
 the ordering as the essential fact: *retire the reward first, suppress the copy second; the reverse
-makes the feature disappear quietly.*
+makes the feature disappear quietly.* The protocol-layer half of the same decision is
+[client-fidelity.md](../skills/server-revival/reference/client-fidelity.md) §8.
 
 Write the dependency **next to both changes**. It is the only place it can live.
 
@@ -412,7 +408,10 @@ How the correction was written, and this is the transferable part:
 - it **keeps the earlier measurement**, which was valid;
 - it marks the constant that fix introduced as **not to be reverted**;
 - it adds a **falsifiable prediction** for the remaining half — *connect twice and it should get twice
-  as fast; that confirms accumulation.* The prediction held and named the real cause.
+  as fast; that confirms accumulation.* ⚠ It was never run, so that half is still open —
+  [guarding-destructive-operations.md](guarding-destructive-operations.md) §8 carries what would
+  settle it. An open prediction is the better exemplar: what transfers is that the correction *left
+  one*.
 
 > **(A) Editing the wrong claim away is how the half that was right gets reverted six sessions later
 > by someone who cannot see why it is there.**

@@ -90,8 +90,9 @@ and disproved.
   optimisation; skipping a delete is the loss you built the vault for.
 - ⛔ **Never patch the guest's slot cursor.** It drives the slot-list UI. Change the *destination
   the bytes land in*, not the number the game is holding.
-- ⛔ **Never add a pin source that is not an observed load.** Four of the five wrong answers were
-  new pin sources that seemed like better evidence than the last one.
+- ⛔ **Never add a pin source that is not an observed load.** Each rejected source seemed like
+  better evidence than the last: [slot-identity.md](reference/slot-identity.md) §8 lists five, and
+  four of them reached players.
 - ⛔ **Never let a guard silently stop saving.** A guard that only refuses converts one bug into a
   worse one; instrument it so "nothing was written this session" is loud.
 - ⛔ **Never tell a player to uninstall to fix this.** On Android that deletes app-private storage —

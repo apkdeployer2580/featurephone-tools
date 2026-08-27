@@ -60,7 +60,9 @@ The third is the only source with any evidence about a kill; without it an inves
 "no crash, so no bug".
 
 **(B)** *Method: dump the exit history for the app's uid and read the reason codes as a list, not
-one at a time.* The reference port's list was:
+one at a time.* Invocation:
+[../../port-shipping/reference/crash-triage.md](../../port-shipping/reference/crash-triage.md) §2.
+The reference port's list was:
 
 ```
 #0        reason=3  (LOW_MEMORY)               rss=104 MB

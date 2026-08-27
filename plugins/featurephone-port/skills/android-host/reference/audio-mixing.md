@@ -161,11 +161,14 @@ a quiet handset makes them raise every slider.
 **(A) Method** — arithmetic on measured peaks, no listening required. Take the §4 peak table, put both
 in-game sliders at maximum, compute the delivered level of one effect over each song's peak.
 
-**(B)** The reference port's table, both sliders at maximum:
+**(B)** The reference port's table. The other two rows are §4's song peaks with both sliders at
+maximum; the **first row is that same loudest song arriving at the default music setting**, included
+because it is the operating point a developer tests at — so run the method twice, once at maximum and
+once at the default step, or the row the developer sees is the one you never computed:
 
 | music peak | effect delivered | note |
 |---|---|---|
-| 0.42 | **±0.0 dB** | default settings — the limiter never engages |
+| 0.42 | **±0.0 dB** | the loudest song as it arrives at the **default** music setting — the sum never reaches the knee |
 | 0.66 | **−5.9 dB** | |
 | 1.18 | **−20.2 dB** | the loudest song in the title — effectively erased |
 
@@ -192,18 +195,30 @@ be in place before the effect's own transient, release long enough that a run of
 pump. Keep the sum limiter — it becomes a rare-peak safety net instead of an always-engaged stage.
 
 **(B)** Duck gain `0.5` (−6 dB), attack **12 ms**, release **140 ms** (ref:
-`<app-crate>/src/audio_mix.rs`). The §8 arithmetic re-run after the change: at music peak 0.42 the
-effect stays at **±0.0 dB — bit-unchanged**; at 0.66, −5.9 → **−0.1 dB**; at 1.18, −20.2 →
-**−3.8 dB**.
+`<app-crate>/src/audio_mix.rs`). The §8 arithmetic re-run after the change — these are the
+*effect's delivered level*, not the mix: at maximum sliders, music peak 0.66 goes −5.9 →
+**−0.1 dB** and 1.18 goes −20.2 → **−3.8 dB**; at the default step (the same song arriving at
+0.42, sum below the knee) the effect stays at **±0.0 dB**, because the limiter was idle there
+before and after.
+⚠ Arithmetic only — the reference port shipped this without a listening test on the handset that
+reported the fault. Settle it by playing the loudest song with both sliders at maximum, firing a run
+of effects, and listening for the music coming back (§20).
 
-Three arguments to carry across, all **(A)**:
+Three things to carry across — two arguments and one limit on what you may claim, all **(A)**:
 
 1. ⛔ **Do not go deeper.** 0.4 and 0.3 were computed: they buy the effect a further 2.3 dB and
    3.6 dB, and at that depth *the music dip becomes the thing the player notices*. A duck you can
    hear as a duck is a worse bug than the one you fixed.
-2. **The assurance argument is what makes it shippable:** a player at default settings hears
-   bit-identical output, because the limiter was idle there. Without that property you cannot ship a
-   mix change to a device someone already tuned by ear.
+2. ⛔ **Know what the assurance actually covers — it is narrower than it looks.** Bit-identical:
+   the *effect's* delivered level at default settings (the limiter was idle, so those samples reach
+   the output untouched), and the whole mix for as long as no effect plays — the envelope sits at
+   exactly `1.0` and `gain * 1.0 == gain`. **Not** unchanged: the mix *while an effect sounds*. The
+   duck multiplies the music bus every frame regardless of whether the limiter was ever engaged, so
+   at default settings an already-tuned device now dips its music up to −6 dB on every effect. Do
+   not let this ride on a limiter-idleness argument: limiter idleness says nothing about the duck.
+   This is an audible change you are choosing to make, so it needs a listening confirmation (§20),
+   not an assurance. *(Contrast §11, where "bit-identical default" is literally true — the level
+   row's default entry **is** the shipped constant.)*
 3. **Ducking is closer to the original design than not ducking** — the guest itself silences the music
    completely in order to play an effect (the single-slot behaviour the core deliberately refuses to
    reproduce). You are implementing a gentler version of the designer's intent.
@@ -416,7 +431,9 @@ resources.
 2. **Pure-arithmetic selftests over the mixing module.** Keep envelope and level maths dependency-free so
    a standalone test can `include!` the real source: clamping in both directions over a large iteration
    count, the release-at-zero path, recovery to unity, default-equals-shipped, step spacing, the ceiling,
-   out-of-range fallback, and *output unchanged at default settings* — §9's assurance argument, asserted.
+   out-of-range fallback, and *the effect's delivered level unchanged at default settings* — assert the
+   effect delta `limit(bed+effect) − limit(bed)`, which is what §9's arithmetic is about; there is no
+   automated assertion that the mix is unchanged, because it is not.
 3. **A pinned mirror where `include!` is impossible** — the standard case being one law split across core
    and host, the core's half living in a vendored `no_std` crate beside the trait it serves. Do not accept
    an unverified mirror: have the test **read the real source file**, split on the function signature,
@@ -466,8 +483,9 @@ treat "a person said yes" as a required exit criterion for the audio step of you
       comes **from that table**, and the level control's top step leaves the limiter headroom.
 - [ ] The delivered effect level computed over each song's peak at maximum sliders — if it falls on the
       loud songs, you have the §8 fault.
-- [ ] Music ducks while an effect sounds, no deeper than about −6 dB, and a default-settings mix is
-      **bit-unchanged**.
+- [ ] Music ducks while an effect sounds, no deeper than about −6 dB; the **effect's delivered
+      level** at default settings is unchanged, and a person has listened on a real device to the
+      music dipping and coming back.
 - [ ] Duck state is one atomic counted in **bus frames**, combined with `fetch_max`, released every frame
       including zero, clamped both ends, degenerate rate guarded, reset on background.
 - [ ] The effect/music balance is a **setting** whose default is bit-identical to the shipped constant,

@@ -238,17 +238,36 @@ devices. Record the measurement in the constant's comment.
 
 ## 5. The joystick
 
-**(A) A feature-phone RPG latches a walk direction on keydown.** It does not integrate an
-analog vector. That single fact determines the whole design and it is wrong to design around
-the *input device* instead of around the *guest*.
+**(A) Before you tune anything, settle how the guest consumes direction keys.** This is a "the
+game does X" claim, so it is settled in a probe run and not by reading the input handler
+([evidence-standard.md](../../../shared/evidence-standard.md#6-behaviour-is-settled-dynamically-never-by-reading-disassembly)).
+Three runs: hold one direction; hold two at once; hold one, add a second, then release the first.
 
-**Four-way, dominant-axis, exactly one key held at a time.**
+| what the run shows | what to build |
+|---|---|
+| the guest **latches** one direction on keydown and ignores a second held key | four-way, dominant-axis, exactly one key held — the design below |
+| the guest samples a **held-key mask** each frame and moves diagonally on UP+RIGHT | eight-way: hold both axis keys and emit each axis's keyup/keydown **independently**; drop `TURN_RATIO`. Two dead zones still apply, **per axis** |
+| the guest integrates an **analog vector** | ignore this section |
+
+A held-key mask is not exotic — it is the shape of J2ME's `Canvas.getKeyStates()`, so a run is
+cheaper than an assumption.
+
+**(B) The reference port's guest latched on keydown**, and everything below is that guest's
+answer: **four-way, dominant-axis, exactly one key held at a time.** Design around the *guest*,
+not around the *input device*.
 
 ```
-DEAD_ENGAGE = 0.30   // fraction of radius before any direction engages
-DEAD_KEEP   = 0.15   // hysteresis: stay engaged until you fall below this
-TURN_RATIO  = 1.2    // the new axis must beat the old by this factor to take over
+DEAD_ENGAGE = 0.30   // (B) fraction of radius before any direction engages
+DEAD_KEEP   = 0.15   // (B) hysteresis: stay engaged until you fall below this
+TURN_RATIO  = 1.2    // (B) the new axis must beat the old by this factor to take over
 ```
+
+**(B)** All three were tuned by feel on one port's devices — derive yours the way §4 derives
+`TAP_SLOP`: hold each direction deliberately ten times and rest a thumb near centre ten times, and
+put `DEAD_ENGAGE` above the resting cluster with `DEAD_KEEP` below it. **(A)** The *shape* is the
+transferable part — two dead zones with `DEAD_ENGAGE > DEAD_KEEP`, plus a turn ratio on a latching
+guest — not the values
+([gamepad-and-pad-hud.md](gamepad-and-pad-hud.md) §6).
 
 - **Centre is fixed at touch-down**, not trailing the finger. A trailing centre makes it
   impossible to hold a direction while adjusting grip.
@@ -294,11 +313,13 @@ For a **physical** stick the quantiser is the same one: sum the hat and the anal
 quantising and share this function rather than duplicating it —
 [gamepad-and-pad-hud.md](gamepad-and-pad-hud.md#5-axes-hat--stick-summed-latest-sample-triggers-as-synthetic-keycodes).
 
-**Why not eight-way with two keys held (A).** It is the obvious design and it is wrong for a
-latched-direction guest: holding UP+RIGHT makes the guest latch whichever arrived last and
-ignore the other, so a diagonal produces the same motion as one cardinal but with an extra
-key stuck down. If your guest genuinely integrates a vector, ignore this section — but prove
-it with a probe run before you do, not by reading the input handler.
+**Why not eight-way with two keys held — when the guest latches (A).** It is the obvious design
+and it is wrong for a latched-direction guest: holding UP+RIGHT makes the guest latch whichever
+arrived last and ignore the other, so a diagonal produces the same motion as one cardinal but
+with an extra key stuck down. That argument is scoped to **row 1** of the discriminator at the top
+of this section. Row 2 inverts it — a held-key-mask guest *needs* both keys down, and four-way
+one-key-at-a-time is what makes its diagonals unreachable — and row 3 skips the section outright.
+Which row you are in is settled by the probe run, not by reading the input handler.
 
 ## 6. Held-key release discipline
 
@@ -373,7 +394,9 @@ different modal rules are two confirm behaviours to debug, and only one of them 
 ## 8. Auto-repeat lives on the worker
 
 **(A)** The UI sends edges; the worker synthesises repeats. Roughly every 100 ms **(B)** the
-worker re-sends keydown for each key it believes is held.
+worker re-sends keydown for each key it believes is held — the interval is per-port tuning, the
+**ownership rule** underneath it is not
+([gamepad-and-pad-hud.md](gamepad-and-pad-hud.md) §23).
 
 Put it on the worker, not the UI, because:
 
@@ -525,7 +548,8 @@ The disc was deleted the following session.
 | A key sticks down forever after backgrounding | worker auto-repeat with no release on suspend | release-all on suspend, focus loss and editor entry (§6) |
 | Character stops when changing direction | keydown(new) sent before keyup(old) | reverse the order (§5) |
 | Two fingers on one button, lifting one stops movement | unconditional keyup | keyup only when no other pointer holds the key (§3) |
-| Diagonal drag makes the character jitter | no turn ratio between axes | `TURN_RATIO` (§5) |
+| Diagonal drag makes the character jitter, on a latching guest | no turn ratio between axes | `TURN_RATIO` (§5, row 1) |
+| The character walks only in cardinals though the original moved diagonally | built four-way against a guest that samples a held-key mask each frame | settle the direction model in a probe run first (§5) |
 | Thumb resting near centre chatters | one dead zone | two: `DEAD_ENGAGE` > `DEAD_KEEP` (§5) |
 | A confirm button alternates between two behaviours | decided on both DOWN and UP | latch the DOWN decision (§7) |
 | A big panel fires while the player swipes over it | hit test is "inside", not "tap" | tap-slop zone (§4) |
@@ -554,7 +578,9 @@ The disc was deleted the following session.
 - [ ] Three touch-identity sets exist and `slide_touches` gates sliding.
 - [ ] `update_touch` is the only sender of key edges, with both guards.
 - [ ] Direction changes emit keyup(old) before keydown(new).
-- [ ] Two dead zones and a turn ratio on the joystick; centre fixed at touch-down.
+- [ ] The guest's direction model — latched, held-key mask, or analog vector — was settled in a
+      probe run *before* the stick was tuned; two dead zones, a turn ratio if the guest latches;
+      centre fixed at touch-down.
 - [ ] `release_all_held()` is called on suspend, focus loss, editor entry, family change and any
       mode change that removes a held control; the pad has its own release beside it.
 - [ ] `old == new_key` is the first test in the key-edge function.

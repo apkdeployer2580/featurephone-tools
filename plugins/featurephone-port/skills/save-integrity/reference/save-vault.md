@@ -122,8 +122,8 @@ opposite:
   what you cannot rely on during a recovery.
 * **It works at the title screen**, which is where the player is standing when they see the empty
   slot they want back.
-The price is that the only readable signal about *which character* a record holds is its **length** —
-which is why §6 puts the length in the file name.
+The price — **(B)**, and only while the payload is encrypted — is that the only readable signal about
+*which character* a record holds is its **length**, which is why §6 puts the length in the file name.
 
 ---
 
@@ -154,7 +154,7 @@ write amplification inside a guest storage call (§12) — the list is a whiteli
 **(A)** Name each archived generation:
 
 ```
-<zero-padded unix-ms>-<length>.bin        e.g.  00001756100480123-1792.bin
+<zero-padded unix-ms>-<length>.bin        e.g.  01756100480123-1792.bin
 ```
 
 **Zero-padded, fixed width.** A lexicographic listing is then a chronological listing, for every tool
@@ -162,9 +162,10 @@ write amplification inside a guest storage call (§12) — the list is a whiteli
 millisecond stamp is 13 digits today, so **(B)** the reference port pads to 14 and the ordering stays
 valid for millennia.
 
-**The length in the name.** Per §4 the length is the *only* readable owner signal, so putting it in
-the name makes the vault a timeline you can read **without decrypting a byte or even copying a
-file**:
+**The length in the name.** Per §4 the length is the *only* readable owner signal **when the record
+is encrypted** — if yours are plaintext, put a character identifier in the name too and the rest of
+this section is unchanged. Putting the length in the name makes the vault a timeline you can read
+**without decrypting a byte or even copying a file**:
 
 > **A jump in length names the moment that slot became a different character.**
 

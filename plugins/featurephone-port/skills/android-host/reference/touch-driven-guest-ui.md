@@ -278,12 +278,12 @@ someone opens a window bigger than the one you measured.
 **★ (A) For input geometry and for transient widget selection, the game's pixels are the only
 trustworthy source; memory is for cross-checking (§14).** This inverts the correct instinct for
 *data* widgets — a minimap, a gauge — which
-[guest-widgets.md §3](guest-widgets.md#3-do-not-screen-scrape-reimplement) covers. Treating pixels as
+[guest-widgets.md §3](guest-widgets.md#3-do-not-screen-scrape-reimplement-for-data-widgets) covers. Treating pixels as
 a last resort here costs builds: three consecutive memory-based guesses each cost one.
 
 Three independent proofs, all `HIGH / CONFIRMED` on device:
 
-1. **A selection can exist nowhere in memory.** A module-drawn yes/no confirm moved its highlight on
+1. **A selection can exist nowhere in memory.** **(B)** A module-drawn yes/no confirm moved its highlight on
    a RIGHT press with **zero bytes changing** anywhere in a 43 KB whole-record watcher, while about
    1,040 pixels moved. The selection lives in module-local state unreachable from memory.
 2. **One cursor byte, two grid shapes.** **(B)** The standard bag drew 8 cells × 2 rows at pitch 19;

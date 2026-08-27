@@ -36,8 +36,8 @@ reference is worth more than a tidy sequence.
 | # | Chapter | Owner | Exit criterion, in one line |
 |---|---|---|---|
 | 0 | Decide and scope | `port-triage` | Platform named, dump in hand, non-redistributable list written down |
-| 1 | Classify the dump | `archive-prep` | Classifier prints platform + descriptor + jar name + native member with a BSS value |
-| 2 | Repair and prepare the archive | `archive-prep` | Zero CR bytes, names agree, private saves stripped, survivors byte-identical |
+| 1 | Classify the dump | `archive-prep` | Classifier prints platform + descriptor + jar name + native member with a BSS value (flat-image AOT; see ch. 1) |
+| 2 | Repair and prepare the archive | `archive-prep` | Zero CR bytes, names agree, private saves stripped, survivors byte-identical (criteria 4–5 always; 1–3 are platform-specific — see ch. 2) |
 | 3 | Scaffold and vendor the core | `port-shipping` → `emulator-core` | Host crate and probe crate both `cargo check`; upstream base commit recorded |
 | 4 | First headless boot, virtual clock | `emulator-core` | A dumped frame reports **non-black > 0** |
 | 5 | Walk the guest forward | `emulator-core` | No fatal unimplemented stub across N minutes of scripted input |
@@ -81,7 +81,8 @@ reference is worth more than a tidy sequence.
 - **Entry:** a file, of unknown shape.
 - **Do:** `python "${CLAUDE_PLUGIN_ROOT}/tools/classify_archive.py" <archive> --json`.
 - **Exit:** it prints a platform, the descriptor keys, the inner jar name, and the native member
-  name with a parsed BSS value (AOT platforms), or a MIDlet manifest (J2ME).
+  name with a parsed BSS value (**flat-image** AOT; on a linked-ELF guest the classifier reports
+  the member and states that its BSS is not in the filename), or a MIDlet manifest (J2ME).
 - **Fails like:** the emulator prints a clean `not a <platform> archive` at load time — a load
   failure, not a panic. Clean message ⇒ you are in chapter 1, not chapter 4.
 
@@ -89,7 +90,13 @@ reference is worth more than a tidy sequence.
 
 - **Owner:** `archive-prep`
 - **Entry:** platform known.
-- **Exit, all five:**
+- **Exit, all five** — 1–3 below are the **KTF flat-image** form. On LGT the native member is a
+  linked ELF and the BSS comes from its `.bss` **section header**, not the filename; SKT and J2ME
+  have no CRLF step, no `AID` key and no native member. Read 1–3 as "the descriptor parses cleanly
+  under **your** platform's parser / the descriptor's jar key resolves to a real entry / the BSS
+  size is known by **your** platform's route", and see
+  [platform-matrix.md §11](platform-matrix.md#11-which-chapters-change-per-platform) for what
+  replaces each:
   1. the app descriptor contains **zero CR bytes**;
   2. the AID equals the inner jar's basename exactly;
   3. the native member's name parses to a BSS integer;

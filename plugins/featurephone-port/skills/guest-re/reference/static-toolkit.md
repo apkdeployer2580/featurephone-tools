@@ -195,7 +195,7 @@ xref.py -t target.toml slot 0x138            # who computes or loads sl + 0x138
 
 ### ⚠ An immediate scan for a *value* proves nothing either
 
-The caveat in §5 belongs here too, and its absence cost a real session. Three separate image-wide searches for "a `movs rX, #0x81` feeding a `strb`" returned **zero** sites, and that null result was used as grounds to doubt an anchor that was in fact correct. The compiler had *synthesised* the constant:
+The caveat in §5 belongs here too, and its absence cost a real session. **(B)** Three separate image-wide searches for "a `movs rX, #0x81` feeding a `strb`" returned **zero** sites, and that null result was used as grounds to doubt an anchor that was in fact correct. The compiler had *synthesised* the constant:
 
 ```
 movs r2, #0x7f

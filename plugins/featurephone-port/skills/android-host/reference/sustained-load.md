@@ -69,8 +69,9 @@ the interpreter *is* the game.
 reducible because they produce nothing** — a repaint identical to the last one, and reverb applied to
 silence, have no observer. And **measure per screen class, not once**: **(B)** the reference port
 counted 12 platform draw calls per frame in the field against 1,650–2,450 small fill-rect calls per
-frame on panel screens, the latter at 5–7 fps on the low-end phone. One measurement taken on the
-wrong screen sends the next three sessions to the wrong layer —
+frame on panel screens, one of which — a network modal — cost ~112 ms of host work per frame on the
+low-end phone. One
+measurement taken on the wrong screen sends the next three sessions to the wrong layer —
 [graphics-perf.md](../../emulator-core/reference/graphics-perf.md).
 
 ## 3. What you must not touch: the frame rate is the game speed
@@ -311,7 +312,11 @@ verification procedure: `${CLAUDE_PLUGIN_ROOT}/shared/device-verification.md`.
 
 ## 13. Measuring honestly on a device
 
-**(A)** Three traps invalidate a whole performance round, and each is one command to check.
+**(A)** Three traps invalidate a whole performance round; one of them is one command to check. The
+invocations are printed once, in
+[../../port-shipping/reference/crash-triage.md](../../port-shipping/reference/crash-triage.md):
+the frequency-policy and thermal pair for **(b)** in §9. Trap **(a)** is read off the installed
+package's own flags, and **(c)** is a round-trip you run yourself (below).
 
 **(a) You were measuring a debug artifact.** Setting only the optimisation level on the debug profile
 makes a build *usable*, not *measurable*: debug assertions and overflow checks stay on, and an ARM

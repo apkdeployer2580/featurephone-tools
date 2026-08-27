@@ -23,7 +23,7 @@ copy the method, not the number · **(C)** do not copy. Confidence pairs and the
 5. [Why it ships without a behavioural A/B: direction of safety](#5-why-it-ships-without-a-behavioural-ab-direction-of-safety)
 6. [Failure B — a poll that yields only on an empty queue never returns](#6-failure-b--a-poll-that-yields-only-on-an-empty-queue-never-returns)
 7. [Why the per-poll timer bound is ONE](#7-why-the-per-poll-timer-bound-is-one)
-8. [Failure C — an unimplemented timer cancel is a speed multiplier per screen visited](#8-failure-c--an-unimplemented-timer-cancel-is-a-speed-multiplier-per-screen-visited)
+8. [Failure C — an unimplemented timer cancel is a leak with a speed symptom](#8-failure-c--an-unimplemented-timer-cancel-is-a-leak-with-a-speed-symptom)
 9. [Generation-keyed timer shots](#9-generation-keyed-timer-shots)
 10. [Clamping the guest's timer is a behaviour change](#10-clamping-the-guests-timer-is-a-behaviour-change)
 11. [REFUTED — the frame-timer period was the player's speed setting](#11-refuted--the-frame-timer-period-was-the-players-speed-setting)
@@ -179,20 +179,26 @@ that is already struggling.
 > ★ **(A) "Hand control back after each frame" is what the bound means. Anything above 1 recreates a
 > smaller version of the bug the bound was added to fix.**
 
-## 8. Failure C — an unimplemented timer cancel is a speed multiplier per screen visited
+## 8. Failure C — an unimplemented timer cancel is a leak with a speed symptom
 
 **(A)** If the platform's timer-cancel primitive is a warning-log no-op returning success, and arming
-**pushes** a new shot onto the event queue instead of **replacing** the pending one, then every screen
-the guest visits leaves a live frame timer behind. The frame callback then runs N times per period
-and the game runs N× fast.
+**pushes** a new shot onto the event queue instead of **replacing** the pending one, then a screen the
+guest visits leaves a live frame timer behind. ⚠ That the callback therefore runs N times per period
+and the game runs N× fast is *derived* from those two primitives — it was never observed; see the
+grade below.
 
-`HIGH / CONFIRMED (code reading plus the reported symptom shape).` The player report is **"the game
+`HIGH / INFERRED (two host primitives read in full, plus one report's shape).` The player report is **"the game
 got faster after visiting one particular screen once"**, and the model makes a falsifiable prediction
-that closes it: *a second visit makes it faster again.*
+that closes it: *a second visit makes it faster again.* ⚠ That prediction was never run, so the
+accumulation half rests on the two primitives plus one report; what would settle it is in
+[guarding-destructive-operations.md](../../../shared/guarding-destructive-operations.md) §8. **The
+fix in §9 does not rest on that model** — it rests on the stub pair, which was read in full, and it
+is behaviour-preserving: its A/B is frame-identical.
 
 > ★ **(A) This is easy to misattribute**, because it presents as a speed-up tied to one screen and so
 > gets blamed on whatever else changed that session — in the reference port, on a frame-timer clamp
-> that had already been fixed. **Any WIPI/MIDP port with a stubbed cancel has this defect.** Read your
+> that had already been fixed. **Any WIPI/MIDP port with a stubbed cancel and a pushing arm path has
+> the leak**; whether it presents as a speed-up is the ⚠ above. Read your
 > cancel primitive and your arm path before theorising: does arming replace, or push?
 
 ## 9. Generation-keyed timer shots
@@ -346,7 +352,7 @@ was the game's own design speed; three counters and one log line end that argume
 | Fixing the obvious sleep helped a little, so you concluded that was not the problem | The second grid is still there | §3 |
 | On a slow device `tick()` stops returning: input latency unbounded, backgrounded app still burning CPU | The pump yields only on an empty queue and the callback re-arms an already-due timer | §6 → §7 |
 | Mean tick well over the frame budget on a low-end device, better when fewer timers are handled per poll | A per-poll bound above 1 chains whole guest frames | §7 |
-| The game got faster after visiting one screen once — and faster again the second time | Timer cancel is a no-op stub and arming pushes instead of replacing | §8 → §9 |
+| The game got faster after visiting one screen once | Timer cancel is a no-op stub and arming pushes instead of replacing | §8 → §9 |
 | The player's speed setting stopped mattering, or the game runs at exactly double the chosen speed | A host ceiling clamp on the frame-timer period, which *is* the speed option | §11 — add a floor |
 | Capping fps to cool the device produced slow motion | On this class of title the frame rate is the game speed | §10 |
 | One class of screen runs at a few fps while play is fine, host thread ~78 % idle there | The game armed a much longer timer in that state | §15 — nothing to fix |

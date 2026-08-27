@@ -78,7 +78,7 @@ impl MethodBody<WieError, dyn WIPICContext> for TraceStub {
 /// address bands so a small integer argument cannot fault the emulator.
 fn peek(context: &mut dyn WIPICContext, v: WIPICWord) -> String {
     const IMAGE: Range<u32> = 0x0010_0000..0x0040_0000;      // (B) your loader's base + size
-    const HEAP:  Range<u32> = 0x4000_0000..0x4080_0000;      // (B) heap base + a sane window
+    const HEAP:  Range<u32> = 0x4000_0000..0x4080_0000;      // (B) your heap's base + a sane window
     if !IMAGE.contains(&v) && !HEAP.contains(&v) { return String::new(); }
     let Ok(b) = context.read_bytes(v, 16) else { return String::new() };
     format!(" [{}|{}]", hex(&b), ascii(&b))
@@ -87,6 +87,12 @@ fn peek(context: &mut dyn WIPICContext, v: WIPICWord) -> String {
 
 **Rules for the peek helper (A):**
 
+- **Both bands are yours, and both are per build.** The image band is the window your loader passes
+  to `core.load()` ([address-model.md](../../guest-re/reference/address-model.md) §2, and §9 for why
+  a section-mapped build's `.text` can start three orders of magnitude lower — a band written for the
+  other build refuses every valid pointer, and a refusal reads exactly like "the feature is not
+  available here"). The heap band is the `map()` call that creates the guest heap;
+  [memory-footprint.md](memory-footprint.md) §3 is the method that finds it.
 - **Plausibility-gate every dereference.** An ungated peek turns a WIPI call taking an integer into
   an `InvalidMemoryAccess` and you have replaced one fatal error with another.
 - Print **both** hex and ASCII. Half of what these APIs take is a C string, and the ASCII column is
@@ -113,8 +119,10 @@ appears nowhere near the stub.
 > ("name-keyed record delete was a no-op upstream") filed as a quirk of that interface rather than as
 > the rule it is. **Refuted by** a shipped speed bug: the platform's timer-**cancel** call was a
 > logging no-op while the timer-**set** call *pushed* a new event instead of replacing the keyed one,
-> so every visit to a screen that arms its own timer left a live timer behind and the guest's frame
-> callback ran once per live timer. The player's report was *"the game speeds up after connecting to
+> so a visit to a screen that arms its own timer left a live timer behind. (⚠ That the callback
+> therefore ran once per live timer, accumulating per visit, is derived from the two primitives and
+> was never observed —
+> [guarding-destructive-operations.md](../../../shared/guarding-destructive-operations.md) §8.) The player's report was *"the game speeds up after connecting to
 > the network"*, and it was first misattributed to an unrelated clamp change. **Why the wrong reading
 > was attractive:** a no-op looks *neutral* — it returns success, nothing faults, and the call appears
 > in the trace — so it reads as "handled" in exactly the log you are using to decide what is handled.
@@ -126,7 +134,7 @@ appears nowhere near the stub.
 find its `unset` / `free` / `close` / `stop` in the same table and implement it in the same sitting.
 Where you cannot, record it as a **known leak with a named symptom**, never as a neutral placeholder.
 The verification is a **round trip**: enter the screen that acquires, leave it, come back, and confirm
-the resource count — timers firing per second, live handles, open sockets, live clips — is identical
+the resource count — **live** timer objects, live handles, open sockets, live clips — is identical
 to before. Doing that once per subsystem is cheaper than one misattributed speed bug. The specific
 timer case, including why arming must *replace* a keyed shot rather than push one, is
 [frame-pacing.md](frame-pacing.md) §8–§9.

@@ -84,6 +84,8 @@ pub fn hud_bottom_patch(read: &impl Fn(u32, usize) -> Vec<u8>) -> Option<(u32, [
 }
 ```
 
+The three constants are **(B)** — this is §3b's block-skip site, and §3b shows the branch arithmetic that produces `0xe1d3`. What transfers is the shape of the function, not the numbers in it.
+
 Every property here earns its place **(A)**:
 
 | property | why |
@@ -145,6 +147,8 @@ Rewrite an **immediate operand** in place. Same instruction length, same instruc
 0x14654e   2164  movs r1, #100      ->  2132  movs r1, #50     (x2)
                                      ->  2119  movs r1, #25     (x4)
 ```
+
+**(B)** Both sites are reference-port values, and each was reached by a method you can re-run: the first by the refusal-string → text-id → dispatcher-arm → single-call-site → backward-disassembly chain in [recipes.md](recipes.md) Recipe B, the second by the accumulator → writers → arithmetic chain in Recipe C. Run the chain on your own title — the addresses will be different, and the re-encoding is the only part that transfers.
 
 Before shipping one, write down three things:
 
@@ -246,6 +250,8 @@ pub const DEAD_HI: u32 = 0x0014_a6aa;
 
 const _: () = assert!(SCRATCH >= DEAD_LO && SCRATCH + 4 <= DEAD_HI && SCRATCH % 4 == 0);
 ```
+
+The three addresses are **(B)** — the cave bounds are the output of the reachability sweep described immediately below, and yours will differ. Do not carry them across; carry the sweep.
 
 **A compile-time assert, not a test.** Drifting the scratch address out of the proven range means scribbling on live guest code. That must not be something a passing build can do.
 

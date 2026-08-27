@@ -109,9 +109,11 @@ purpose: `target == pin.slot => Allow`. Write down why it is safe, in the source
 **(A)**:
 
 ```rust
+// ⚠ THE PREMISE BELOW IS AN INFERENCE UNTIL YOU DISASSEMBLE YOUR OWN SERIALISER AND
+//   ENUMERATE ITS LOADS -- slot-identity.md §11.
 // WHY `target == pin.slot => Allow` IS SAFE: the serialiser has no source of bytes other than
 //   the loaded character, so bytes aimed at the pin's own slot ARE the pinned character's save,
-//   by construction. THEREFORE this arm is exactly as safe as the pin and no safer, and the pin
+//   by construction -- THEREFORE this arm is exactly as safe as the pin and no safer, and the pin
 //   has ONE legal source: an OBSERVED CHARACTER LOAD. Five other sources were tried; each
 //   destroyed a slot in the field (tombstones below; slot-identity.md §14).
 // ⛔ ADDING A SIXTH PIN SOURCE IS NOT ADDING A HEURISTIC. It grants an authority to overwrite
@@ -306,7 +308,7 @@ One verdict line per character-record write, carrying **every fact the verdict u
 can be re-derived from the log instead of guessed at:
 
 ```
-info  save verdict: target=<Payload>_2 len=1808 pin=slot1/id:known obs=cursor2/id:known age=84ms   -> REDIRECT slot1
+warn  save verdict: target=<Payload>_2 len=1808 pin=slot1/id:known obs=cursor2/id:known age=84ms   -> REDIRECT slot1
 warn  save verdict: target=<Payload>_2 len=1792 pin=slot1/id:known obs=cursor0/id:known age=3140ms -> REFUSE (observation stale)
 ```
 

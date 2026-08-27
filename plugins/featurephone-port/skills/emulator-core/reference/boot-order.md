@@ -308,7 +308,7 @@ porting, because a continue turns one legible line into a flood.
 | Emulator exits at the **first** call into one subsystem, with no `Unimplemented` line, on a second carrier's build | that runtime crate names only a few slots in the block and its `_ =>` arm is `FatalError` | [wipi-c-recipes.md](wipi-c-recipes.md) §3a |
 | Boot log says `Installed 1 hooks` and a generic hook you added never fires | the patch installer returned after the first matching entry | §8c above |
 | Every screen is slow, but each report names one screen; host thread mostly idle | two host sleep grids each rounding the guest's timer period up, multiplying | [frame-pacing.md](frame-pacing.md) |
-| The whole game runs at N× speed after visiting several screens | timer cancel is a no-op while arming **pushes** instead of replacing a keyed shot | [frame-pacing.md](frame-pacing.md) §8 |
+| The game gets faster after visiting certain screens | timer cancel is a no-op while arming **pushes** instead of replacing a keyed shot | [frame-pacing.md](frame-pacing.md) §8 |
 | Millions of guest instructions per frame with only a handful of platform draw calls | the game rasterises in its own guest code; your graphics layer is not the cost | [guest-pixel-loops.md](guest-pixel-loops.md) |
 | "It restarts when I switch away and come back" — no crash dialog, no tombstone | eager guest-heap commit makes the process the low-memory killer's first pick | [memory-footprint.md](memory-footprint.md) |
 | A guest class resolves to `ClassNotFoundException` and the game silently misbehaves | missing emulator-provided Java class | [java-class-recipes.md](java-class-recipes.md) |

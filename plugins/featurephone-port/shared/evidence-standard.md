@@ -347,7 +347,7 @@ disproved, and most were disproved only by running something.
     resolver then answered "no character", which silently removed the HUD and the quick bar and made
     a refresh sweep see an empty container. Two separate player reports, one root cause. A gauge that
     reads high is a gauge to **clamp when drawing**, not evidence that the object does not exist.
-    *Owner: `android-host`.*
+    *Owner: `guest-re`.*
 
 ### Refutation is a deliverable, not a failure
 

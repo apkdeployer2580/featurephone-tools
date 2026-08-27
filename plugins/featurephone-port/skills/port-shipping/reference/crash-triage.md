@@ -51,7 +51,24 @@ none of them is a superset of another.
 |---|---|---|
 | **Tombstone directory** | *What* faulted: signal, cause line, backtrace, register state | Deep detail, but a small ring — old entries roll off |
 | **System crash-log store** | *When* it last happened | **Survives reboots**, so it dates the most recent occurrence without waiting for a reproduction |
-| **Process-exit history** | Deaths with **no crash at all** | The only source that sees an OS kill. Carries the reason code **and the process's resident size at the moment it died** |
+| **Process-exit history** | Deaths with **no crash at all** | The only source that sees an OS kill. Carries the reason code, and a resident size for **every** exit in the list — read the ordinary exits, not the kill record's own post-trim figure (§6) |
+
+```bash
+# (A) Process-exit history — the only source that sees an OS kill (API 30+).
+#     Read reason= and rss= as a LIST; the neighbouring ordinary exits are the finding.
+adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.example.<name>
+
+# (A) System crash-log store — native-crash entries with reboot-surviving timestamps.
+adb -s "$ANDROID_SERIAL" shell dumpsys dropbox --print data_app_native_crash
+
+# (A) Tombstone directory — full detail, but root-only on a user build.
+#     Unrooted: use the dropbox print above, which carries the same dump.
+adb -s "$ANDROID_SERIAL" shell ls -lt /data/tombstones/
+```
+
+**(A)** On a user build the tombstone directory is unreadable over the shell; the crash-log store is
+the shell-accessible route to the same dump, which is why the second row is not redundant with the
+first.
 
 **(B)** In one session the tombstone directory and the crash-log store held the same eight native
 crashes, all ending on the same date — meaning the native fault was already fixed — while the exit
@@ -111,9 +128,23 @@ Full discipline, including the two half-days it costs to skip this:
 
 ## 6. The OS-kill axis
 
-**(A)** When the exit history shows a low-memory reason, the number sitting next to it — the
-process's **resident size at the moment it died** — is not merely a symptom. It is the explanation
-for why the OS chose *your* process.
+**(A)** When the exit history shows a low-memory reason, do **not** read the resident size on the
+kill record as your footprint — it is measured after the platform has already trimmed the process
+and is routinely the smallest number in the list. The evidence for why the OS chose *your* process
+is the recorded size of the **neighbouring ordinary exits**. The list, and the trap, are
+[../../emulator-core/reference/memory-footprint.md](../../emulator-core/reference/memory-footprint.md)
+§2.
+
+> **REFUTED.** *Previously documented (this section, in its first form):* "the number sitting next to
+> it — the process's resident size at the moment it died — is not merely a symptom. It is the
+> explanation for why the OS chose your process." **Refuted by** reading the exit list rather than
+> the one record: the kill entry is written *after* the platform has trimmed the process, so it is
+> routinely the **smallest** figure in a list whose ordinary exits are several times larger.
+> **Why the wrong reading was attractive:** the size is printed immediately beside the reason code,
+> so it reads as that record's explanation of itself. **Consequence if carried forward:** you
+> conclude the process was small when it died, dismiss the footprint hypothesis, and go looking for a
+> crash that never happened. **Limits of the search that produced this:** one device's exit list; the
+> ⚠ post-trim mechanism is read off the size ordering, not from platform source.
 
 > **★ (A) An emulator that reserves a large guest address space is structurally the fattest process
 > on the phone, and therefore first in line for the low-memory killer on every device, no matter how
@@ -123,6 +154,12 @@ for why the OS chose *your* process.
 resident sizes were around half a gigabyte; a live memory dump taken at the title screen attributed
 almost all of it to the guest address space.
 
+```bash
+# (A) Per-process memory report — attribute the resident total to a region
+#     (Native Heap / Graphics / Code) while the app sits on the title screen.
+adb -s "$ANDROID_SERIAL" shell dumpsys meminfo com.example.<name>
+```
+
 This is why a port can be "stable" in every technical sense — no faults, no leaks, a flat allocator
 gauge over thirty thousand headless frames — and still close on people. Nothing is wrong. The
 process is simply the cheapest thing on the phone to kill.
@@ -131,23 +168,13 @@ process is simply the cheapest thing on the phone to kill.
 
 > **★ (A) Commit guest pages on first WRITE only.**
 
-A read of a mapped-but-never-written page must return zero **without committing**. This is not an
-approximation: an eagerly mapped page was zero-filled anyway, so the bytes handed back are
-identical. The only thing that changes is whether the phone is holding them.
-
 **(B)** Replacing an eager mapper with a lazy page table plus a per-page mapped bitmap, measured A/B
 on the same phone and the same screen: total resident size **−47 %**, native heap **−66 %**.
 
-**(A) One constraint comes with it, and it will bite immediately if you miss it:**
-
-> Once commit is lazy, *"is there a page object here"* is no longer the answer to *"is this address
-> mapped"*. Keep the permission map as a **separate bitmap**, or a freshly mapped heap reports as
-> unmapped until something writes to it, and the core's own guest-pointer validation starts
-> rejecting perfectly valid pointers.
-
-Keep the page table dependency-free so a standalone selftest can `include!` it —
-`${CLAUDE_PLUGIN_ROOT}/shared/selftest-convention.md`. Process footprint as an ongoing concern:
-[../../emulator-core/reference/memory-footprint.md](../../emulator-core/reference/memory-footprint.md).
+The fix in full — the lazy page table, why a read must not commit, the separate mapped bitmap that
+valid guest pointers depend on, and the bounds-check-free page index — is
+[../../emulator-core/reference/memory-footprint.md](../../emulator-core/reference/memory-footprint.md)
+§3–§7. Do not implement it from this summary.
 
 ## 8. Every saving needs a level gauge
 
@@ -155,9 +182,10 @@ Keep the page table dependency-free so a standalone selftest can `include!` it �
 > LEVEL, so a later regression appears as a number climbing back toward the old value instead of as
 > a vague slowdown.**
 
-**(B)** The lazy-commit change shipped with a committed-guest-pages gauge attached to the periodic
-throughput log, and the interpretation written next to it: *if this climbs back toward the
-precommitted size, something is touching pages it does not need.*
+The worked example and the gauge's own regression threshold are
+[../../emulator-core/reference/memory-footprint.md](../../emulator-core/reference/memory-footprint.md)
+§8; the rate form, for a work saving rather than a memory saving, is
+[../../android-host/reference/sustained-load.md](../../android-host/reference/sustained-load.md) §8.
 
 Without the gauge, the regression is a report six months later that the app "closes a lot again",
 and the entire triage above has to be run from the start.
@@ -175,9 +203,21 @@ built package's own flags rather than remembering which profile you used.
 
 **(A) Check whether the device is capping its own cores** before comparing throughput between
 phones. A vendor performance or game-management policy can pin the big cores to the little cores'
-maximum with no battery saver active and no thermal event, and no code can lift it. **(B)** Measured:
-the big-core policy maximum equalled the little-core maximum, while the hardware maximum was 51 %
-higher — battery at 34.7 °C, low-power flag off.
+maximum with no battery saver active and no thermal event, and no code can lift it.
+
+```bash
+# (A) Administrative (policy) maximum vs hardware maximum, per CPU cluster.
+#     A policy max below the hardware max with no thermal event is a vendor cap.
+adb -s "$ANDROID_SERIAL" shell 'for p in /sys/devices/system/cpu/cpufreq/policy*; do \
+  echo "$p scaling_max=$(cat $p/scaling_max_freq) cpuinfo_max=$(cat $p/cpuinfo_max_freq)"; done'
+
+# (A) Rule out a legitimate throttle before calling it a vendor cap.
+adb -s "$ANDROID_SERIAL" shell dumpsys battery | grep -i temperature
+adb -s "$ANDROID_SERIAL" shell settings get global low_power
+```
+
+**(B)** Measured: the big-core policy maximum equalled the little-core maximum, while the hardware
+maximum was 51 % higher — battery at 34.7 °C, low-power flag off.
 
 ## 10. One axis closed is not the bug closed
 
@@ -202,14 +242,15 @@ either way. See [on-device-diagnostics.md](on-device-diagnostics.md).
 
 ## 11. Checklist before claiming a cause
 
-- [ ] Both axes checked: a tombstone was looked for **and** the exit history was read.
+- [ ] Both axes checked: a tombstone was looked for **and** the exit history was read (§2 commands).
 - [ ] The `versionCode` of the build that died was read off the reporting device.
 - [ ] The tombstone's shape was read (alternating pair? unwinder cap? ASCII in registers?) before
       its contents.
 - [ ] Frames were symbolicated against the binary from **that package**, not a later build, or the
       byte-matching procedure in §4 was used and cross-checked across more than one tombstone.
-- [ ] If the death was an OS kill: the resident size at exit is written down, and the guest address
-      space is accounted for in it.
+- [ ] If the death was an OS kill: the resident sizes of the **ordinary** exits either side of it
+      are written down (not the kill record's own post-trim figure), and the guest address space is
+      accounted for in them.
 - [ ] Any performance number quoted came from a **release** artifact.
 - [ ] Every change that saves memory or work shipped with a level gauge.
 - [ ] The write-up says explicitly whether this was a fix or a mitigation.

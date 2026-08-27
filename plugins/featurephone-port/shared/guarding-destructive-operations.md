@@ -10,7 +10,8 @@ to end in its own skill — [save-integrity](../skills/save-integrity/SKILL.md) 
 repeat its mechanisms; it cites it as the case study that produced most of the rules below.
 
 Tags: **(A)** generic procedure · **(B)** worked example from the reference port, re-derive it ·
-**(C)** do not copy. Conventions: [evidence-standard.md](evidence-standard.md).
+**(C)** do not copy. Conventions: [evidence-standard.md](evidence-standard.md). How to search, and how
+to be wrong cheaply: [investigation-discipline.md](investigation-discipline.md).
 
 ## Contents
 
@@ -222,23 +223,48 @@ trusts**, not from more clauses around it: state and test "this value may only b
 
 > **REFUTED.** *"For any unimplemented platform call, ship a logging no-op returning a plausible value
 > so the guest keeps walking."*
-> **Refuted by:** a report that the game "speeds up after connecting to the network". The timer-**cancel**
-> call was a logging no-op while timer-**set** pushed a new event instead of replacing the keyed one, so
-> every visit to a screen that arms a timer left one behind and the frame callback ran once per live
-> timer — permanently N× speed after N visits.
+> **Refuted by:** a name-keyed record delete that was a logging no-op upstream. The platform's "reset
+> save" returned success, left the record intact, and the supposedly-empty slot reloaded the old save on
+> the next boot — a release-side success return is a lie about a side effect that did not happen.
 > **Why it was attractive:** the rule is correct, and load-bearing, for query-side and set-side calls.
 > **Actual mechanism:** a release-side call has no plausible return value, because the problem is the
 > omitted side effect. Zero is not neutral; it is a leak.
 > **Consequence if carried forward:** the symptom appears arbitrarily far from the stub in time and in
-> subsystem. Second instance in the same core: a name-keyed record delete was also an upstream no-op, so
-> "reset save" left the record and it reloaded on the next boot.
+> subsystem, and it survives the fix to whatever was blamed first.
+> Instance and interface detail: [wipi-c-recipes.md](../skills/emulator-core/reference/wipi-c-recipes.md) §7.
+
+**(B) How the second instance was found — the report that survived its own fix.** A player reported the
+game "speeds up after connecting to the network". That had already been diagnosed once: a host ceiling
+on the frame timer was overriding the player's speed setting, measured on device as *exactly* 2× at the
+slowest setting, and that fix was real and shipped. **The report came back unchanged on the build
+containing it.** A symptom that survives its measured cause is the signal to audit the release side
+rather than re-open the ceiling — and reading the platform layer showed the pair: timer-**cancel** was a
+logging no-op returning success, while timer-**set** *pushed* a new queued shot instead of replacing the
+pending one for the same guest timer object. Both are host source, readable in full.
+
+> ⚠ **INFERRED — the accumulation, not the leak and not the stub pair.** That a screen arming its own
+> timer leaves a live timer behind follows from the two functions themselves, both read in full. What
+> is *derived* — from those functions plus the shape of one player report — is that the frame callback
+> therefore runs once per live timer and the game runs at N× after N visits. **That was never
+> observed.** The reference port shipped the keyed-timer fix with its own device
+> check still open and never closed it, and recorded a standing contingency — cancellation is keyed by
+> the guest's timer-object pointer, so widening that scope was the planned next move if the leak
+> survived. **What would settle it:** (a) in the field after a round trip, watch the guest's
+> requested-timer statistics for the *other* screen's interval turning up in the `min`/`mean`/`max`
+> spread — that is direct evidence a second timer object is still live, and a bare count cannot show it;
+> (b) check whether two round trips scale the speed-up where one did not. One player report of one
+> speed-up does not discriminate between causes, which is how the first diagnosis was declared closed
+> while half the bug remained.
 
 > **(A) For every `set` / `alloc` / `open` / `start` you implement, audit its `unset` / `free` /
 > `close` / `stop` before shipping, and treat a release-side no-op as a known leak with a named symptom
 > rather than as a placeholder.**
 
-**(B) The verification that closes it** is a conservation check, not a screenshot: the per-second timer
-fire count is identical before and after a round trip through the screen that arms the timer.
+**(A) Instrument the pair, not the symptom.** Implementing cancellation is not the end of it. Count the
+guest's cancel calls *and* the pending shots the pump actually discarded as stale, and log both beside
+the guest's requested-timer rate and its min/mean/max spread. On a healthy build the two counters track
+each other and the requested rate returns to its ordinary-play value across a round trip; cancels with
+zero stale drops mean the cancel is not reaching the queue at all.
 
 ---
 
@@ -304,9 +330,8 @@ it cost is in
 
 **(A) A substitute needs the same treatment.** Anything built because a capability was missing carries
 its **expiry condition at the definition site**, with a date — the session that finally implements the
-capability will be working on something else and will not think to look. **(B)** A host-side stand-in
-outlived its own recorded reason by many sessions and was diagnosed instantly only because the comment
-said why it existed.
+capability will be working on something else and will not think to look. Worked case:
+[investigation-discipline.md](investigation-discipline.md) §12.1.
 
 ---
 
@@ -316,13 +341,11 @@ said why it existed.
 > states. Nothing in a diff, a test run or a build shows this — only writing the dependency next to both
 > changes does.**
 
-**(B)** Suppressing a duplicate item the client delivered was correct for one of two item types and
-wrong for the other, because for the second type that "duplicate" *was* the feature: a host-side reward
-was triggered by using it. The first version suppressed both symmetrically and **silently deleted the
-item's entire function**. Only after the host reward was retired — its own stated reason having expired
-several sessions earlier — did the symmetric suppression become correct. The write-up states the
-ordering as the essential fact: *retire the reward first, suppress the copy second; the reverse makes
-the feature disappear quietly.*
+**(B)** The reference port's case — a symmetric suppression that silently deleted a feature, because
+the host still hung a reward off one of the two client-side copies it removed — is worked in
+[client-fidelity.md](../skills/server-revival/reference/client-fidelity.md) §8, which carries the
+refutation block; the search-side rule it produced is
+[investigation-discipline.md](investigation-discipline.md) §12.
 
 **(A)** Adversarial verification caught it — the change was reviewed by asking *for which inputs is this
 wrong?* rather than by re-reading it. Ordering hazards are also a reason not to squash a destructive
@@ -371,7 +394,7 @@ problems — [evidence-standard.md](evidence-standard.md) §4, correction 4.
 | A pin or latch is frozen on one value and silently approves everything | The signal came from a proxy edge with once-per-session cardinality (§5) | Ask the cardinality; re-stamp from the observed event |
 | The safety check "matches" for exactly the users who report the problem | The identity field is a type name, or reads zero in that session (§7) | Verify writer and index; locate safety in the scalar's provenance |
 | A failed operation turns into a deletion | A deferred truncate cleared only on success (§4) | Clear it on **every** failure path; add the row to the path table |
-| Something runs faster or heavier with each visit to one screen | A release-side no-op paired with an implemented acquire (§8) | Audit `unset`/`free`/`close`/`stop`; verify by conservation count |
+| A symptom survives the fix to its measured cause, or something runs heavier after visiting one screen | Suspect a release-side no-op paired with an implemented acquire (§8) — ⚠ the per-visit accumulation model is inferred, not observed | Audit `unset`/`free`/`close`/`stop`; instrument the cancel/stale-drop pair and the requested-rate spread |
 | A previous session's archive edit is missing from the shipped build | Two tools rebuild the same artefact and overwrite each other (§4) | Documented order + `--check` on the solely-owned member |
 | A corruption is real but undatable because the payload is encrypted | Archived generations carry no identifying metadata (§9) | `<timestamp>-<length>` names; the listing is the evidence |
 | The recovery feature consumed the copies it existed to restore | Restore ran through the ordinary rotation (§9) | Archive current bytes first, pin the restored generation |

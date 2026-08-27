@@ -53,7 +53,7 @@ You need, at minimum: a single-byte writer, a byte-range writer, one or more int
 the flush. Find them by:
 
 * starting from the frame work in [framing.md](framing.md) — you already found flush there;
-* `xref.py calls <flush>` to get the caller set, then looking at what *those* functions call most
+* `xref.py calls <flush>` to get the caller set (⚠ zero hits may mean a veneered image — step 2), then looking at what *those* functions call most
   often. The primitives are the small, heavily-called functions with a `(buffer, value)` shape.
 
 **(B)** five primitives: `put_u8`, `put_bytes`, `put_u32_le`, `put_u32_be`, `flush`. The presence
@@ -68,6 +68,12 @@ takes `-t target.toml`.
 Scan the **whole image** for `BL` instructions whose computed target equals the flush address.
 Each hit is one request site. Not one request *type* — one *site*; two sites can emit the same
 message, and one site can emit different messages on different paths (see step 5).
+
+⚠ **First check that your image calls that way at all.** Where every cross-module call goes through
+an `ldr rN, =target|1` + `bx rN` veneer, a BL scan reports **zero** callers for every real function,
+and you conclude the title has no protocol. Compute the literal-pool address instead — detect it once
+per image and stop wondering:
+[static-toolkit.md §2](../../guest-re/reference/static-toolkit.md#2-who-calls-x).
 
 Do not restrict the scan to functions you think are network-related. The point of the technique
 is that it finds the ones you did not think of.
@@ -210,7 +216,15 @@ Sort the string dump for messages of these shapes:
 
 * waiting/progress: "waiting for a server response", "saving to the server", "purchasing…"
 * server-side capacity errors: "your online storage is full"
-* operations with no offline meaning: item transfer, character restore, combining, shop purchase
+* operations that only complete while a server is answering: item transfer, character restore, combining, shop purchase
+
+> **SUPERSEDED in one word.** 0.1.0 called this third shape "operations with no *offline* meaning",
+> and all four named examples turned out to have one: the reference port later shipped storage, the
+> shop and combining **entirely in-process with no network at all**, and retired restore on purpose.
+> The search heuristic is unchanged — those strings still only appear while *something* is answering
+> the socket — but the classifier is **needs a peer** (another live player, an authoritative
+> economy), not "cannot be done offline".
+> [in-process-engine.md §1](in-process-engine.md#1-why-retiring-the-wire-is-the-terminal-answer).
 
 Each distinct progress message is a feature. The reference port's inventory came out as: account
 recovery + networked item storage + an in-game shop + an item-combining operation. Four features,

@@ -93,28 +93,18 @@ anchors — is keyed on that hash or should be.
 
 ### A minor revision is an address-reconfirmation job, not a re-RE job
 
-**(B)** Between two revisions of one carrier package in the reference port, `.text` grew `0x144`
-bytes and the re-hosted blitter moved **+0x74** with its prologue intact. The porting session
-re-verified each clause of the hook's contract against the new binary instruction by instruction —
-early-outs, sprite-descriptor loads, palette arithmetic, row-bytes rounding, argument slot — and
-recorded that trace in the patch table's comment. Budget: hours, not a session. **(A)** The
-method is: recognise the function by its byte shape, compute the displacement from one anchor
-instruction, then confirm *clause by clause* rather than assuming a uniform shift held.
+**(A)** Recognise the function by its byte shape, compute the displacement from one anchor
+instruction, then confirm the hook's contract *clause by clause* rather than assuming a uniform
+shift held — and record that trace in the patch table's comment, so the next revision starts from a
+checked list instead of a function name. Budget: hours, not a session. The measured case, and the
+latent trap of keying an anchor table more coarsely than you verified at, are
+[build-keyed-anchors.md §5](build-keyed-anchors.md#5-key-the-table-at-the-granularity-you-verified).
 
 ### The tell that a hash-keyed table missed
 
 A hash-keyed hook table **falls back silently**: the game boots and runs, just at interpreter
 speed. Judge installation from the boot line that names the hook, never from a throughput gauge —
 a text-only screen legitimately reports zero hits. **(A)**
-
-### ⚠ Key the anchor table at the granularity you verified at
-
-**(B, ⚠ INFERRED)** The reference port keys its *hook* table on the image hash (correct: one entry
-per revision) but its *anchors* table on the carrier only — while every address in that arm's doc
-comments is annotated with one revision's version string. On the other revision the sole remaining
-protection is the read-verify guard, which the repo itself calls probabilistic. **If you already
-hash the image to choose hooks, hash it to choose anchors too** — the information is free at that
-point. Granularity is [build-keyed-anchors.md](build-keyed-anchors.md) §5's subject.
 
 ### The version-numbering trap
 
@@ -449,9 +439,18 @@ sessions each measure a different, correct-looking value**, and each one is refu
 **(B)** A flag byte defied three candidate offsets across multiple sessions. The resolution: the
 game's own store computes `base + *(base + slot_word) + K` — one byte per save slot. Build 1's
 documented offset was **element 0**, one device measurement was **element 1**, and a candidate
-previously written up as "refuted" was **element 6**. The host had been writing a fixed element
-while the player's character was in another slot, so the feature had **never once executed** in the
-shipped build.
+previously written up as "refuted" was **element 6**. The host had been writing a fixed
+element, so the feature was live only for a character that happened to occupy that one slot and dead
+for every other — which is how it passed a device check in one session and came back as "it doesn't
+work" from a different player two sessions later.
+
+**That intermittence is the signature, and it is not the same bug as "it never ran at all."** In the
+reference port **(B)** this same feature had *also* been dead for everyone at an earlier point, for
+an unrelated reason, found and fixed sessions before the array was; §10 of
+[build-keyed-anchors.md](build-keyed-anchors.md#10-generate-the-boot-banner-from-the-tables) carries
+the boot-banner half of that incident.
+The tells are opposites: a build gate is dead for **everyone**, a wrong array index is dead for
+**everyone but one**. Ask whether *any* player has ever seen it work before reaching for either.
 
 The methodology recorded alongside it **(A)**:
 
@@ -472,7 +471,8 @@ The methodology recorded alongside it **(A)**:
 > build 1's documented offset, the device measurement and the "refuted" candidate were all the same
 > array at indices 0, 1 and 6. It is attractive because each individual measurement *was correct*,
 > and because mutual contradiction between correct measurements reads as measurement error rather
-> than as a missing index. **Cost: three sessions and one shipped-but-dead feature.**
+> than as a missing index. **Cost: three sessions, and a feature that shipped working for one save
+> slot and silently broken for every other.**
 
 **Standing question to apply for free: is this offset actually element 0 of something?**
 
@@ -490,14 +490,16 @@ the host must **re-assert on a timer**, not write once.
 address-only anchor invites writing a plausible boolean into a bitfield, shipping a silent no-op,
 and hiding the re-assert requirement entirely.
 
-**Corollary — a null immediate scan proves nothing.** **(A)** A search for "any `movs rX,#0x81`
-followed by a `strb`" returned **0 sites image-wide** and was used as grounds to doubt the anchor;
-the compiler had synthesised the constant. Constants get built (negate, shift pair, add pair,
-reciprocal multiply) and addresses get computed from indices, so **write the search's blind spot
-down next to the null result** — and do not flip a shipping table to `None` on an inference.
-**(B)** The reference port did exactly that: it recorded that its three failed searches "would
-MISS a runtime-computed index", and the next session's answer was a runtime-computed index. Writing
-down the limits is what made the next person dig there first.
+**Corollary — a null immediate scan proves nothing.** **(A)** Constants get built rather than
+loaded (negate, shift pair, add pair, reciprocal multiply) and addresses get computed from indices,
+so **write the search's blind spot down next to the null result** — and do not flip a shipping table
+to `None` on an inference. **(B)** A search for "any `movs rX,#0x81` followed by a `strb`" returned
+**0 sites image-wide** and was used as grounds to doubt the anchor; the compiler had synthesised the
+constant. **(B)** The reference port wrote its blind spot down: it recorded that its three failed searches
+"would MISS a runtime-computed index", and the next session's answer was a runtime-computed index.
+Writing down the limits is what made the next person dig there first — the shipping-table half of
+the same episode is in
+[build-keyed-anchors.md §13](build-keyed-anchors.md#13-when-the-second-build-overtakes-the-first).
 
 ### 8.3 Which operand you rewrite is a correctness decision
 

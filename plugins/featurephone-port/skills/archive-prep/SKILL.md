@@ -45,7 +45,7 @@ The KTF/LGT descriptor parser splits on `\n` and slices from a fixed index **wit
 | name | must equal | consequence if wrong |
 |---|---|---|
 | `AID:<X>` in the descriptor | the outer-zip entry `<X>.jar`, exactly | `NotFound` panic on the virtual FS |
-| `client.bin<digits>` at the jar root | digits parse as the BSS size | `Invalid bss_size in filename` |
+| `client.bin<digits>` at the jar root | digits parse as the BSS size (**KTF**; LGT's `binary.mod` is a linked ELF and carries its BSS in the section table) | `Invalid bss_size in filename` |
 | `MClass:<Y>` | a class the guest image can resolve | `Option::unwrap()` on `None`, or `Main class not found` |
 | `PID:<P>` | anything — but choose once | it is the on-device save directory, forever |
 

@@ -1,7 +1,8 @@
 # Which slot does this write belong to?
 
 A save write reaches the host's record store as `(name, record id, bytes)`. The name carries a slot
-suffix, the bytes are ciphertext, and **nothing in the request names a character.** Deciding whether
+suffix, the bytes are opaque to the host **(B)** — ciphertext in the reference port; §1 says how to
+settle that on your own title — and **nothing in the request names a character.** Deciding whether
 those bytes belong in that slot is the hardest question in this subject: it cannot be answered from
 the request, it has to be answered inside a guest storage call on the emulator thread, and both
 wrong answers cost a player a character. The reference port answered it five times and shipped four
@@ -23,7 +24,7 @@ Tags: **(A)** generic · **(B)** worked example from the reference port, re-deri
 - [8. Non-signals, each with what it cost](#8-non-signals-each-with-what-it-cost)
 - [9. Identity fields lie](#9-identity-fields-lie)
 - [10. The three verdicts, and why delete has no Redirect](#10-the-three-verdicts-and-why-delete-has-no-redirect)
-- [11. Redirect: four fail-closed clauses](#11-redirect-four-fail-closed-clauses)
+- [11. Redirect: what licenses it, and four fail-closed clauses](#11-redirect-what-licenses-it-and-four-fail-closed-clauses)
 - [12. The same-tick race and the synchronous suspend](#12-the-same-tick-race-and-the-synchronous-suspend)
 - [13. Freezing the UI while a save settles](#13-freezing-the-ui-while-a-save-settles)
 - [14. The five attempts, in order](#14-the-five-attempts-in-order)
@@ -37,11 +38,27 @@ Tags: **(A)** generic · **(B)** worked example from the reference port, re-deri
 Three properties, together, make this different from every other guard in a port.
 
 **The request under-determines the answer (A).** The slot suffix comes from guest state, and §2 is
-about the fact that that state is frequently a *menu highlight*. The payload is encrypted, so the
-host cannot read a name out of it — see [save-vault.md](save-vault.md) for why that is an advantage
-everywhere else and a handicap only here. A record's one readable property is its **length on disk**,
-which says whether a record exists and, across generations, whether it changed *character* — never
-whose it is.
+about the fact that that state is frequently a *menu highlight*. What the *payload* tells you is a
+property of your title rather than of the platform, so settle that before you design anything
+downstream **(A)**: dump one record straight after a save and look at it — uniform high entropy, no
+header, no strings means encrypted ([recipes.md](../../guest-re/reference/recipes.md) Recipe A
+step 9); readable field values mean plaintext.
+
+* **(B)** In the reference port the payload is encrypted, so the host cannot read a name out of it —
+  see [save-vault.md](save-vault.md) for why that is an advantage everywhere else and a handicap
+  only here. A record's one readable property is then its **length on disk**, which says whether a
+  record exists and, across generations, whether it changed *character* — never whose it is.
+* ⚠ **INFERRED.** If your records are **plaintext**, you hold a signal the reference port did not: the
+  incumbent record's identity bytes and the incoming buffer's can be compared inside the same
+  storage call. Verify that field the way §9 verifies the reference port's — enumerate its writers,
+  because a name-shaped field in a record can be a *class* name too — and treat it as
+  **corroboration of the pin, not a verdict on its own**: a deliberate "overwrite this slot"
+  produces the same mismatch as a drifted cursor. ⚠ INFERRED — no port here has run it; what would
+  settle it is one port instrumenting that comparison across a session of real loads and saves and
+  reporting its false positives the way §7 does. What it buys outright, if it holds, is a
+  **per-instance** identity, closing §9's "two characters of the same class are indistinguishable"
+  hole, and a [save-vault.md](save-vault.md) §6 generation name that carries *who* as well as
+  *how long*.
 
 **Both wrong answers destroy something (A).** Writing to the wrong slot replaces a character the
 player was not looking at: no error on screen, discovered days later. Refusing is *not* the safe
@@ -168,8 +185,11 @@ temporary record store is **one** sequenced test function, not several
 
 ## 5. Load signals that work
 
-Two shapes, and you want both. Each funnels into one function — `note_slot_loaded(slot, how)` — so
-there is exactly one writer of the pin in the host **(A)**.
+Two shapes; take both where both exist. 5a is available only to a title whose load arm talks to a
+server, and 5b is the one that has to work either way — but "the store sees every read" is not the
+same as "every read is a load", so it is still counted against the load paths (§6) and validated for
+false positives (§7, §8) **(A)**. Each funnels into one function — `note_slot_loaded(slot, how)` —
+so there is exactly one writer of the pin in the host **(A)**.
 
 ### 5a. An outbound frame the load arm itself builds
 
@@ -187,15 +207,20 @@ all. A dead recogniser and a working one look identical from outside.
 
 ### 5b. A read of the payload record
 
-The record store sees every read. Treat **a read of the payload record, record id 1, whose length on
-disk falls inside a plausibility band** as a load of that slot **(A)**. A band, not an equality: a
-serialised save length is content-dependent, and a measured value is never an invariant
+The record store sees every read. Treat **a read of the payload record, at the record id your writer
+actually uses, whose length on disk falls inside a plausibility band** as a load of that slot
+**(A)**. Both halves are measured, and neither is copied: the id comes out of the §7 instrumentation
+run — the same log that records every open with its mode also names the id — never out of the
+disassembly ([evidence-standard.md](../../../shared/evidence-standard.md) §6). **(B)** In the
+reference port it was id 1 (§7). Key the predicate on the wrong id and it never fires — and a dead
+recogniser looks exactly like a working one (§5a). And a band, not an equality: a serialised save length is
+content-dependent, and a measured value is never an invariant
 ([patching.md](../../guest-re/reference/patching.md) §6).
 
 This is the signal that covers the load paths which announce nothing (§6), and the reason the policy
 belongs in the record store: **it is the only layer that sees all of them.** The two signals cannot
 disagree — both write the same pin through the same function, and the later observation wins because
-it is the later load.
+it is the later load — but see §11 for the unmeasured window between this read and the deserialise.
 
 ---
 
@@ -391,14 +416,56 @@ exhaustively that the delete function **never** returns a `Redirect`.
 
 ---
 
-## 11. Redirect: four fail-closed clauses
+## 11. Redirect: what licenses it, and four fail-closed clauses
 
-The argument that makes a redirect sound is structural (A): **the serialiser has no source other than
-the loaded character**, so bytes aimed at a drifted slot are *by construction* the pinned character's
-save. Landing them in the pinned slot is not a guess about content; it is a correction of an address.
+A redirect is licensed by **two** things, and only one of them is in this section.
 
-That argument holds only while all four clauses hold, and every clause fails **closed** — a failure
-falls back to §10's Allow/Refuse decision, never to the drifted aim:
+The structural half gets you halfway (A): the serialiser is fed from whatever character is **live**,
+so bytes aimed at a drifted slot are the *live* character's save. ⚠ In the reference port that was a
+rationale, never a derivation — the serialiser was located by
+[recipes.md](../../guest-re/reference/recipes.md) Recipe A, which finds *where* it is and not what it
+reads, and nobody ever enumerated its loads. Settle it on your own title by disassembling the
+serialiser and listing every source it loads from: a staged load buffer parked in a global, or a
+restore payload held between arrival and the swap, would break it outright. ⚠ A second window has the
+same shape and is likewise unmeasured: if your load signal is the record *read* (§5b), the pin names
+the incoming slot from the moment of the read, while the live character is still the outgoing one —
+**(B)** in the reference port the read and the world initialisation that deserialises are separated
+by a state transition — and §10's `target == pin ⇒ Allow` would pass a write
+of the outgoing character into the incoming slot. A store log that timestamps the read, the swap and
+every verdict (§7, and [policy-and-diagnostics.md](policy-and-diagnostics.md) §9) would settle
+whether any write lands there.
+
+The other half is not structural at all. Getting from *the live character* to **the pinned
+character** is §4's invariant — the pin is exact because an observed load is its only writer — and
+§6's — you have counted *every* load path. **The four clauses below do not establish that and cannot;
+they filter an already-exact pin.** Landing a write in the pinned slot is a correction of an address
+only while the pin is exact; while it is not, it is the most confident data-loss mechanism in the
+port. **So: ship the redirect once §4 and §6 hold, and refuse until they do.** Refusing on principle
+is not the safe default — it is §1's and §14's attempt 1, the answer that stopped a container session
+from saving at all.
+
+> **REFUTED.** *"The redirect is sound as long as its four clauses hold: a pin exists, the
+> observation is fresh, the identities match, and the observed cursor equals the write's own
+> target."*
+>
+> **Refuted by** the device trace of the build that shipped with exactly those four clauses: all four
+> held, and the redirect still landed one character's save on another character's slot. The pin was
+> stale because a second load path announces nothing (§6), and the identity clause could not tell the
+> two characters apart because that field is a class name and the player's two characters shared a
+> class (§9). The build was recalled.
+>
+> **Why it was attractive:** every clause is individually correct, individually fails closed, and
+> individually has a test. A set of sound clauses reads as a proof.
+>
+> **Limits of the search that produced this:** the clauses were tested against a single-character
+> account, which cannot exercise either failure — a second load path needs a second route into the
+> world, and a class-name collision needs two characters of one class.
+>
+> **Carried forward:** §14's meta-lesson — when a guard trusts one scalar completely, the thing to
+> state and test is the scalar's *provenance*, not the guard's clauses.
+
+Each clause fails **closed** — a failure falls back to §10's Allow/Refuse decision, never to the
+drifted aim — and none of them is a substitute for §4 and §6:
 
 1. **A pin exists.** Nothing is required of its *identity* here — clause 3 compares it, and
    requiring a *readable* one is the tightening §9 preserves as refuted. (§4 defines identity
@@ -598,7 +665,8 @@ Before you ship any policy that decides where a save lands:
 - [ ] Every rejected pin source carries a tombstone comment naming it and what it cost.
 - [ ] Policy is one dependency-free pure function per decision; no condition anywhere else.
 - [ ] `delete_verdict` has no `Redirect` arm, and a selftest asserts that exhaustively.
-- [ ] Redirect: four clauses, each failing closed; freshness bounded against the poll interval; the
+- [ ] Redirect: **§4 and §6 are done first** — a redirect on an inexact pin is worse than a refusal —
+      then four clauses, each failing closed; freshness bounded against the poll interval; the
       summary redirects with its payload; an unconstructable rename refuses.
 - [ ] The redirect suspends **synchronously** when a character-replacing request goes on the wire.
 - [ ] Identity is never used to *tighten* (`0 == 0` is a match), and its real meaning was established

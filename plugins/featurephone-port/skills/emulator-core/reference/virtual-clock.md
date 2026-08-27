@@ -146,7 +146,9 @@ The shape that works **(A)**:
 // budget/threshold values are per title — measure yours (B: one port used 24 / 6 / 16)
 const FRAME_BUDGET_MS: u64 = ...;   // hard wall-clock cap on one frame's ticking
 const TICK_FULL_MS:    u64 = ...;   // a tick taking longer than this means the game is work-bound
-const FRAME_PACE_MS:   u64 = ...;   // target display cadence
+const FRAME_PACE_MS:   u64 = ...;   // a CEILING on how often the loop runs — never a target frame
+                                    // rate; derive it from the fastest period the guest's own timer
+                                    // can request (frame-pacing.md §4, §10), not from a display rate
 
 let frame_start = Instant::now();
 loop {
@@ -175,10 +177,12 @@ Two rules **(A)**:
   sleeps a fixed pace, or an event pump that sleeps a flat interval whenever its queue empties,
   silently divides the game's speed. Sleep until the earliest due timer, keep the old flat value only
   as a **ceiling**, and give it a ~1 ms floor.
-- **Measure host idle before optimising anything further.** A slow screen with the host thread mostly
-  *idle* is not the host's problem. **(B)** After the pacing fixes, the reference port's panel screens
-  still measured 7.5 fps with the host thread **79 % idle** — the remaining cost was the guest's own
-  244 ms timer, which is a guest-patch policy decision and not an emulator defect.
+- **Measure host idle before optimising anything further** — *once the grids below are gone.* A slow
+  screen with an idle host thread is either this file's sleep bug or the guest asking for it, and the
+  requested-period gauge is what tells them apart. **(B)** After the pacing fixes, one class of screen
+  in the reference port was still slow with the host thread idle, and the remainder was the guest's own
+  244 ms timer — a guest-patch policy decision, not an emulator defect.
+  [frame-pacing.md](frame-pacing.md) §15 owns that measurement.
 
 **The pathology this shape does not prevent has its own file.** Two independent host loops, each
 rounding the guest's period up to its own ~16 ms grid, **multiply**. The diagnostic tell is

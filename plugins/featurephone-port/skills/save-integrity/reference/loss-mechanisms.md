@@ -327,7 +327,7 @@ a save was refused. `HIGH / CONFIRMED` — shipping a reject-only policy produce
 | verdict | when | why it is safe |
 |---|---|---|
 | **Allow** | the write targets the pin's own slot | safe *only* because the pin is exact — [slot-identity.md](slot-identity.md) §4 |
-| **Redirect(slot)** | a foreign target whose owner is proven | the serialiser has no source but the loaded character, so bytes aimed at a drifted slot are **by construction** the pinned character's save |
+| **Redirect(slot)** | a foreign target whose owner is proven | ⚠ structural only as far as the *live* character, and that much is itself an inference; getting from live to **pinned** is §4's pin invariant plus §6's path count, not this table — [slot-identity.md](slot-identity.md) §11 |
 | **Refuse** | you cannot prove it | last resort, not the default |
 
 **Redirect the disk landing point, never the guest's cursor.** Renaming the target directory for one write
@@ -475,7 +475,7 @@ re-file it as a named regression test whose name states the reported sequence
 | "Saving, please wait" looks broken — its button does nothing | not a loss, but you will get this report: an input-swallowing modal drawn with an answerable OK band | Draw a variant with no button; test the more specific modal *before* the save lock in the key path |
 | A fix passed its tests, shipped, and destroyed a save — again | the guard trusts one scalar, so every added clause is downstream of a wrong input | [slot-identity.md](slot-identity.md) §14 — provenance, not clauses |
 
-Cross-referenced into [fault-dictionary.md](../../../shared/fault-dictionary.md) §2.10.
+Cross-referenced into [fault-dictionary.md](../../../shared/fault-dictionary.md#28-save-data-loss-slots-and-restore) §2.8, *Save data: loss, slots and restore*.
 
 ---
 

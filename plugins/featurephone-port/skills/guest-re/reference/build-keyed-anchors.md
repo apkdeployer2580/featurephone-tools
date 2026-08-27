@@ -235,9 +235,9 @@ is an **address-reconfirmation job, hours not sessions** — but it is not a no-
 
 Two corollaries:
 
-* **Identify a build by its hash in prose, too.** **(B)** One build's package descriptor version and
-  its in-game splash version disagree, and a comment in the reference repo's own patch table had the
-  two numbering schemes crossed and named the wrong archive as the shipped one.
+* **(A) Identify a build by its hash in prose, too** — never by a version string. The two
+  numbering schemes that do not agree, and the shipped wrong claim they produced, are
+  [multi-build.md §1](multi-build.md#1-three-levels-of-build-identity--hash-the-native-member-first).
 * **A hash-keyed table must not short-circuit the generic entries.** **(B)** An installer that
   `return`ed after the first hash match meant six generic library hooks had never installed on any
   build, for years, while the boot log printed a cheerful `Installed 1 hooks`. That is

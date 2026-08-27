@@ -163,6 +163,8 @@ The four probes, quoted:
 
 **(A)** These are the only names that matter. Get all four consistent and a KTF archive boots.
 
+⚠ **The fourth name is KTF's.** LGT's native member is `binary.mod`, a **linked ELF** whose section table carries the BSS — no filename BSS, no image base, no self-relocation ([platform-matrix.md §7](../../port-triage/reference/platform-matrix.md#7-a-second-aot-loader-shape-the-linked-elf-guest)). The first three names still apply to both.
+
 ### AID — the jar lookup key
 
 `jar_filename = format!("{}.jar", adf.aid)`. The runtime then sets `java.class.path = "rt.rustjar:net.wie.rustjar:<AID>.jar"` and does `new JarFile("<AID>.jar")` against the virtual filesystem, **by exact name**. Rename the AID and the jar entry together and it still boots; rename either alone and you get `NotFound`. The AID is otherwise inert — it carries no semantics.
@@ -266,20 +268,23 @@ Because the whole archive is held in RAM, archive size is an Android memory cost
 
 **Per-title (all found mechanically, all in step 1–3):**
 
-- AID, PID, MClass, jar basename, the `client.bin<N>` BSS value.
+- AID, PID, MClass, jar basename, and — on a **flat-image KTF** guest — the `client.bin<N>` BSS value.
 - Resource tree inside the jar and every filename convention in it.
 - Data-record layouts, marker bytes, trailer sizes — see [record-formats.md](record-formats.md).
 - Text encoding, if the title is not Korean (hard-wired EUC-KR in the vendored core).
 - Whether repacking is needed at all.
 
-**Never (safe to rely on):**
+**Never on any platform (safe to rely on):**
 
 - Detection by magic filename: `__adf__` / `app_info` / `*.msd` / MIDlet manifest.
-- `IMAGE_BASE = 0x100000`; BSS from the native member's filename; self-relocation at `IMAGE_BASE + 1` with the Thumb bit set.
-- AID = jar basename. PID = save namespace. MClass required and unobtainable from anywhere else.
-- CRLF in the descriptor = unbootable, for KTF and LGT; harmless for SKT and J2ME.
 - Zip entry order and per-entry compression method are free; entry *names* are not.
 - No signature or CRC gate on the jar.
+
+**Never *within* a platform, but not across platforms — establish which you have first:**
+
+- **KTF only.** `IMAGE_BASE = 0x100000`; BSS parsed out of the native member's filename; self-relocation at `IMAGE_BASE + 1` with the Thumb bit set. That is the **flat-image** loader shape, and it is not the only AOT shape here — LGT's `binary.mod` is a **linked ELF** with live section headers, so there is no image base at all, the BSS comes from the `.bss` section header, entry is `e_entry`, and the guest never rebases. Check the native member's first bytes for `\x7fELF` before deriving any address: [platform-matrix.md §7](../../port-triage/reference/platform-matrix.md#7-a-second-aot-loader-shape-the-linked-elf-guest).
+- **KTF and LGT.** CRLF in the descriptor = unbootable; harmless for SKT and J2ME.
+- **KTF and LGT.** AID = jar basename. PID = save namespace. MClass required. *Unobtainable from anywhere else* is an **AOT** property (there are no `.class` files to enumerate, §6), not a descriptor one. SKT and J2ME have none of these three keys: entry class is `MIDlet-1` field 3, save namespace is the suite identity.
 
 **One trap that couples §9 to repacking.** `install_binary_patches` matches the guest image's **md5** against a table shipped with the emulator core. A hash-keyed entry that resolves to zero patches is **fatal**; a hash-less generic entry only warns. **(B)** The reference core shipped exactly one entry, generic. A new title needs no entry at all — but the moment you add a hash-keyed one and then repack or patch the guest binary on disk, the md5 moves and the loader dies loudly. Patch guest memory at runtime instead (that is the `guest-re` rule), and this never bites.
 
