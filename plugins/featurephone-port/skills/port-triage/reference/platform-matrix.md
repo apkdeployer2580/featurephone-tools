@@ -292,10 +292,28 @@ is in something you removed.
 
 ## 10. What differs per platform
 
+⚠ **Two of these columns were measured and two were read.** KTF and LGT are exercised end-to-end
+across two carrier packages of one title. **SKT and J2ME were established statically, by reading the
+fork's own backends — no port has been run on either.** Treat their cells as a starting hypothesis to
+confirm against your fork, not as measurements. Full split:
+[reference-implementation.md](../../../shared/reference-implementation.md).
+
+**(A) How to establish the guest form for any platform, in one read:** open your fork's backend for
+it and look at what its `load()`/`do_start()` constructs. A backend that builds a **JVM** (a class
+loader, a proto/class-set list, a main-class resolve by name) has a **bytecode** guest, and the whole
+static ARM toolkit is void for it no matter what the platform is called. A backend that maps an image
+and starts an **ARM core** has an AOT guest. **(B)** Doing exactly that on the reference fork is what
+corrected the SKT column: its backend parses the `.msd` as a *text descriptor* (`MIDlet-1:` field 3 is
+the main class, the same key a `.jad` uses), then builds a JVM with the MIDP class set **plus** an
+SKVM set (`com.skt.m.*`, `com.xce.*`) and a WIPI-Java set, and dispatches a `MIDlet` subclass to the
+MIDlet launcher and anything else to the SK-VM `Main` entry. Earlier revisions of this page hedged
+that column with "partly" and "verify the ISA", which is worse than a blank — it sends a porter
+looking for an ARM address model that does not exist.
+
 | | KTF | LGT | SKT | J2ME |
 |---|---|---|---|---|
 | magic entry | `__adf__` | `app_info` | `*.msd` | `.jad` / manifest |
-| guest form | AOT ARM | AOT ARM | SKVM | JVM bytecode |
+| guest form | AOT ARM | AOT ARM | **JVM bytecode** (SKVM class set) | JVM bytecode |
 | native member | `client.bin<N>` | `binary.mod` | — | — |
 | image shape | flat blob | **linked ELF** (§7) | n/a | n/a |
 | BSS source | filename suffix | **`.bss` section header** | n/a | n/a |
@@ -305,7 +323,8 @@ is in something you removed.
 | entry point key | `MClass` | `MClass` | `MIDlet-1` field 3 | `MIDlet-1` field 3 |
 | save namespace | `PID` | `PID` | suite identity | suite identity |
 | CRLF hazard | **yes** | **yes** | no | parser-dependent |
-| needs `guest-re`'s ARM toolkit | yes | yes | partly | **no** |
+| needs `guest-re`'s ARM toolkit | yes | yes | **no** | **no** |
+| **provenance of this column** | ported end-to-end | ported end-to-end | **read out of the fork's backend; never ported** | **read out of the fork's backend; never ported** |
 
 ## 11. Which chapters change per platform
 
@@ -315,13 +334,13 @@ is in something you removed.
 | 1b Which build/revision | hash the native member; two carrier builds share no code addresses | same | same | same question, class files |
 | 2 Repair | CRLF + three-name rule | CRLF + name rule, BSS differs | no CRLF step | manifest sanity only |
 | 3–6 Core | identical — these are emulator defects, not title bugs | identical | identical | identical |
-| 7 Address model | full four constants | **section table instead** — no image base, no delta, no self-rebase (§7) | verify against your fork's loader | **skip** — no image base, no delta |
-| 8 Strings | image-wide byte-class scan | same | same | constant-pool scan |
-| 9 Offsets | struct offsets, two derivations | same | same | field names; keep the rule for semantics |
+| 7 Address model | full four constants | **section table instead** — no image base, no delta, no self-rebase (§7) | **skip** — same as J2ME | **skip** — no image base, no delta |
+| 8 Strings | image-wide byte-class scan | same | constant-pool scan | constant-pool scan |
+| 9 Offsets | struct offsets, two derivations | same | field names; keep the rule for semantics | field names; keep the rule for semantics |
 | 10–12 Device | identical | identical | identical | identical |
-| 13 Patch/call | Thumb halfword rewrites | same | verify the ISA | bytecode/interception |
+| 13 Patch/call | Thumb halfword rewrites | same | bytecode/interception | bytecode/interception |
 | 14 Verify | identical | identical | identical | identical |
-| 15–17 Network | socket slots of the WIPI C API | same | SKVM equivalent | MIDP `Connector` / `SocketConnection` |
+| 15–17 Network | socket slots of the WIPI C API | same | MIDP `Connector` / `SocketConnection` (the MIDP class set is loaded) | MIDP `Connector` / `SocketConnection` |
 | 18–19 Ship | identical | identical | identical | identical |
 
 ## 12. What is invariant across all four

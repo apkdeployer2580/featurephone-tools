@@ -21,11 +21,14 @@ transfers, the number does not · **(C)** never copy.
 | installing or pinning host tools | [toolchain.md](reference/toolchain.md) |
 | running or editing the build | §2 + [build-script.md](reference/build-script.md) |
 | any constant baked at compile time (server host, pin, feature flag) | [config-baking.md](reference/config-baking.md) |
+| what a release build actually resolved at runtime, or reading logs and gauges off a phone you cannot `run-as` | [on-device-diagnostics.md](reference/on-device-diagnostics.md) |
 | making the build run on Linux/macOS, or off the author's machine | [host-portability.md](reference/host-portability.md) |
 | tests, device-free gates, CI | [testing-and-ci.md](reference/testing-and-ci.md) |
 | release, signing, versionCode, AAB, handing out a build | §3 + [build-script.md](reference/build-script.md) |
+| sideload-only distribution, telling players which build to run, pulling a bad build back | [distribution-and-recall.md](reference/distribution-and-recall.md) |
 | "can I publish / open-source / commit this?" | §4 + [publish-audit.md](reference/publish-audit.md) |
 | a build or install error | [troubleshooting.md](reference/troubleshooting.md) |
+| the app closes with no error, an ANR, a native tombstone, or a crash only some phones show | [crash-triage.md](reference/crash-triage.md) |
 
 ## 1. Scaffold
 
@@ -35,7 +38,7 @@ Run to generate a project:
 python "${CLAUDE_PLUGIN_ROOT}/tools/scaffold.py" --dest ./<name> --name <name> \
   --display "<Display Name>" --app-id com.example.<name> --env-prefix <NAME> \
   --gradle-prefix <name> --archive-name <archive>.zip --platform ktf \
-  --template-ref <tag> [--screen 240x320] [--no-server] [--dry-run]
+  --template-repo <your-template-url> --template-ref <tag> \n  [--screen 240x320] [--no-server] [--dry-run]
 ```
 
 State these three rules to the user **before** running it — each one fails at runtime, not at
@@ -49,6 +52,11 @@ build time, so a hand-edit that looks correct is not (A):
 3. **The native library must be named `main` in three places at once** — Cargo `[lib] name`,
    `System.loadLibrary("main")`, and the manifest's `android.app.lib_name`. Disagreement is an
    `UnsatisfiedLinkError` at launch, not a compile error.
+4. **You supply the template.** No template repository is published with this plugin, and
+   `scaffold.py` refuses to run without one. [scaffolding.md](reference/scaffolding.md) §3 and
+   §7–§10, plus `scaffold.py`'s own token table and `scaffold.toml` reader, **are** its
+   specification. Build and tag it once — every later title reuses that tag, and that reuse is what
+   makes the second and third port cheap.
 
 Parameter table, per-parameter blast radius, and the five gaps a template must close:
 [scaffolding.md](reference/scaffolding.md).

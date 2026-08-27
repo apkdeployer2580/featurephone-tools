@@ -200,7 +200,7 @@ was itself later refuted, which is the most useful row in the table.
 | "this routine opens a secondary socket" | it is a **paged text-box builder**; no secondary socket exists | a function near network code is not network code |
 | "the backup ack is a toast" | the toast made the client **cleanly close the socket**; the correct ack is a commit-ack, after which the client sends its next request and advances | dismissing a modal ≠ advancing a state machine |
 | "this item category contains 16 entries" | those bytes were **ciphertext noise** in an encrypted resource member; decrypted, the category is empty | never parse an encrypted member as if it were plaintext |
-| "the login sequencer force-sends a restore for slot 0" | ~~never observed on a real client~~ — **it does, on every login whose first slot is empty** (see the correction below) | absence from a short capture is not evidence a path does not run |
+| "the login sequencer force-sends a restore for slot 0" | ~~never observed on a real client~~ — **it does; the login's sub-request fork is chosen by a session-state byte, and one of its three branches is the restore opcode** (see the correction below) | absence from a short capture is not evidence a path does not run |
 | "a 16-entry array means expansion is impossible" | 16 is **one page**; capacity is a byte the server writes | a client array bound is not a feature bound |
 | "padding a short list reply blanks the client's stale rows" | storage filled with **one item the player never owned** — an all-zero row is a valid item identifier | "the handler memsets that array" proves the array is dirty, **not** that stale rows are drawn |
 | "writing zero into a row's count makes the row not exist" | a **visible, pickable, eternally mergeable ghost row** — dug to the end and dropped | check the client's *painter* and its *merge scanner* before choosing any sentinel |
@@ -214,9 +214,10 @@ was itself later refuted, which is the most useful row in the table.
 > in the log once as each. Live characters were overwritten as a result, because the client's restore
 > handler has no occupancy check.
 > **Why the wrong reading was attractive:** it was an honest device observation. The capture was
-> short, and the path only fires for a player whose **first slot is empty** — a condition no
-> developer's test account is in for long. "I watched and it did not happen" is exactly what a
-> conditional path looks like from outside its condition.
+> short, and the login picks between three different sub-requests from a session-state byte — the
+> captures simply took a different branch, and the branch that emits this one names whatever slot
+> the client is about to use (in the production log, **not** the first). "I watched and it did not
+> happen" is exactly what a conditional path looks like from outside its condition.
 > **Actual mechanism and correction:** the discriminator is not "did this connection upload a
 > backup?" but **has the login finalised yet?** — and even that is not sufficient on its own, because
 > **no server can tell the two senders apart**. The destructive request must additionally be
@@ -232,7 +233,8 @@ was itself later refuted, which is the most useful row in the table.
 > reset"* — with nothing wrong-looking in the log.
 
 **★ The transferable rule: `⚠ never observed` is a note about your capture, not about the client.**
-Write it as *"not observed in n sessions, all with a non-empty first slot"*, and it stays honest.
+Write it as *"not observed in n sessions, none of which took the login fork that emits it"* — name
+the branch you failed to exercise, not a property of your account — and it stays honest.
 `${CLAUDE_PLUGIN_ROOT}/shared/investigation-discipline.md` §7 is the general form.
 
 ## ★ Preserve refuted CANDIDATE fixes, not only refuted claims

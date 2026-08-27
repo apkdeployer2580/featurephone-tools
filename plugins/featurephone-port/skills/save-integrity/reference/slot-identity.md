@@ -340,7 +340,8 @@ consequences fall straight out:
 >
 > **Carried forward:** a real, reproduced data-loss bug traded for an imaginary one.
 
-The rule (A): **tighten on the pin's provenance, not on identity.** Safety comes from the pin being
+The rule (A): **tighten on the pin's provenance, not on identity** — which is why §11's clause 1
+asks only that a pin *exist*. Safety comes from the pin being
 exact on every observed load (§5–§7), not from clauses downstream of a scalar you do not trust. An
 identity check built on a misread field is security theatre that reads as safety and fails silently
 in the most common case — and it is
@@ -399,7 +400,11 @@ save. Landing them in the pinned slot is not a guess about content; it is a corr
 That argument holds only while all four clauses hold, and every clause fails **closed** — a failure
 falls back to §10's Allow/Refuse decision, never to the drifted aim:
 
-1. **A pin exists**, and its identity is known.
+1. **A pin exists.** Nothing is required of its *identity* here — clause 3 compares it, and
+   requiring a *readable* one is the tightening §9 preserves as refuted. (§4 defines identity
+   `0` as "could not read", so a readability clause here would make clause 3's `0 == 0`
+   unreachable and refuse every write on the title → online → container route — the exact
+   session shape a redirect exists to fix.)
 2. **The observation is fresh.** The worker's `(cursor, identity)` observation has a maximum age.
    **(B)** 3 s against a ~100 ms poll. A stalled worker means a stale identity, and a stale identity
    is the one thing a redirect must never act on.
@@ -572,7 +577,7 @@ Two operational duties that go with it:
 | the pin is correct in play but wrong after a load from the local menu | a second load path that announces nothing (§6) |
 | the pin walks across slots whenever the slot list is drawn | the summary-record scan is being read as a load (§8) |
 | the guard held the pin across a genuine load "because the identity did not change" | the identity field is a class name, and the two characters share a class (§9) |
-| a live character is replaced right after an online screen, equipment intact | a server reply, not a slot bug — [threat-model.md](../../server-revival/reference/threat-model.md), and §12 |
+| a live character is replaced right after an online screen (story, equipment and items all reset) | a server reply, not a slot bug — [threat-model.md](../../server-revival/reference/threat-model.md), and §12 |
 | the "saving, please wait" panel looks broken | it swallows all input but drew an answerable OK band (§13) |
 | a green selftest is defending the bug you just found | the test asserted an interpretation of its input; re-file it as a named regression test ([policy-and-diagnostics.md](policy-and-diagnostics.md) §7) |
 

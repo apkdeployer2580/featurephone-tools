@@ -45,8 +45,9 @@ loss could be *confirmed* afterwards, let alone undone.
 > **Refuted by:** production server logs plus the schema. The table was keyed
 > `PRIMARY KEY (account, slot)` — one mutable cell per slot — so a single upload of a damaged
 > character overwrote the last good copy, and the client re-uploads on ordinary events (**(B)** on
-> every container page turn). The stored fragment carried equipment only, which is exactly why the
-> matching player report described story flags and inventory gone with equipment intact.
+> every container page turn). The stored fragment was an *old* one carrying equipment records only —
+> no story flags, no inventory — so restoring it produced the matching player report: *story,
+> equipment and items all reset*.
 > **Why it was attractive:** the feature is *called* a backup, the player is told to rely on it, and
 > it demonstrably restores something.
 > **Consequence if carried forward:** the damage itself destroys the recovery, in one round trip. A

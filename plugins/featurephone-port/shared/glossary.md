@@ -44,7 +44,8 @@ loader's parsing habits".
 
 **MIDP / J2ME** — *Java 2 Micro Edition* plus the *Mobile Information Device Profile*: the
 international (non-Korean) feature-phone Java stack. A J2ME guest is `.class` bytecode, never
-AOT-compiled ARM, so the static ARM toolkit in `guest-re` does not apply to it.
+AOT-compiled ARM, so the static ARM toolkit does not apply — neither in `guest-re` (chapters 7–9)
+nor in the static half of `server-revival` (Phases 1–4, chapter 16).
 
 **MIDlet** — a J2ME application class extending `javax.microedition.midlet.MIDlet`, declared by a
 `MIDlet-1:` attribute in the jar manifest or in the JAD. Presence of that attribute is the J2ME

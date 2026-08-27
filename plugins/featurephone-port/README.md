@@ -7,7 +7,8 @@ emulator core. It covers the whole distance: classifying and repairing the archi
 emulator core up on a real commercial title, reverse-engineering the guest ARM binary with a
 headless probe, building the Android host layer with a placeable touch HUD, optionally reviving a
 game server that no longer exists, and finally signing, shipping and publish-auditing the result.
-Seven skills, twenty chapters with explicit exit criteria, twenty-three runnable tools, and a
+Eight skills, twenty numbered chapters plus 11a and 20, each with explicit exit criteria,
+twenty-four runnable tools, and a
 fault dictionary that maps a symptom to the phase that owns it.
 
 ## Posture: bring your own dump
@@ -25,6 +26,13 @@ own legally obtained dump of a game you own.** Title-specific constants that app
 the documentation are tagged **(B)** — a worked example from one reference port — and are always
 introduced by the *method* that found them, so you can rerun the method on your own title instead
 of copying a number that will be wrong for you.
+
+**Platform coverage is not uniform.** KTF and LGT are exercised end-to-end across two carrier
+packages of one title. **SKT/SKVM and J2ME are detection probes, loader constants and per-platform
+deltas read statically out of the emulator's own backends — neither has been ported.** Most of the
+pipeline is platform-invariant; the guest reverse-engineering chapters (7–9, 13) and the static half
+of chapter 16 are where those platforms derive their own ground. Full split in
+[shared/reference-implementation.md](shared/reference-implementation.md).
 
 Provenance tags used across every file in this plugin:
 
@@ -60,7 +68,7 @@ Then start with **`/featurephone-port:port-triage`**. It classifies your dump, p
 backend, and routes you to the chapter you are actually in — including when you are resuming a
 half-finished port months later.
 
-## The seven skills
+## The eight skills
 
 | slash command | what it owns | when it fires |
 |---|---|---|
@@ -69,13 +77,14 @@ half-finished port months later.
 | `/featurephone-port:emulator-core` | Changes inside the vendored emulator (`vendor/wie`, `vendor/arm32_cpu`). Stops at the `Emulator` trait boundary. The six failures a real title hits, in order. | black screen with no error, `Unimplemented` with a table id, a JVM thread-attach panic, stutter on busy maps, `AllocationFailure` after tens of minutes, "stack pointer is not in a rw map" |
 | `/featurephone-port:guest-re` | The guest binary and the host↔guest contract: the address model, static cross-referencing, the headless probe, patching guest RAM, calling guest functions | "where is the save function", "find this offset", disassembly, cross-references, Thumb patching, probe runs, differential verification |
 | `/featurephone-port:android-host` | The native Android layer above the `Emulator` trait and below Gradle: threading, blit, touch, HUD, layout editor, host-side widgets, CJK glyphs, storage, config | letterboxing, a control that fires by itself, a virtual joystick, HUD placement, Korean text rendering blank, JNI dialogs, orientation, vibration, saves on device |
+| `/featurephone-port:save-integrity` | The player's saved game, across every layer that can delete it: the vendored record store, the host's file writes, a guest field misread as an identity, and a destructive server reply. Owns the archive-before-overwrite vault and the slot-identity question. **Cross-phase** — no single phase skill owns all four. | "my character disappeared", a slot reads as empty, one save overwrote another, saves stopped persisting, making a record write atomic or guarded, a save backup/restore/vault, a build recall |
 | `/featurephone-port:server-revival` | Everything on the wire, both endpoints. **Optional** — offline titles skip it entirely. | a shut-down official server, a private/replacement server, packet RE, socket slots, a client stuck on a waiting-for-server modal, a reply table, TLS and certificate pinning |
 | `/featurephone-port:port-shipping` | Project generation, the build pipeline, signing, distribution, and the publish audit | scaffolding a new port, `UnsatisfiedLinkError`, duplicate-class errors, an unsigned APK, versionCode discipline, a Play listing, "what may I safely commit or open-source" |
 
-Level-1 cost when nothing triggers is seven descriptions. Only the skill you land in loads its
+Level-1 cost when nothing triggers is eight descriptions. Only the skill you land in loads its
 body; its reference files cost nothing until read.
 
-## The pipeline — 20 chapters
+## The pipeline — 20 numbered chapters, plus 11a and 20
 
 Each chapter has an exit criterion. Do not advance without it. Full list with exit criteria:
 `skills/port-triage/reference/pipeline.md`.
@@ -106,6 +115,7 @@ Each chapter has an exit criterion. Do not advance without it. Full list with ex
 
 10. First device build and run — `port-shipping`
 11. Input, screen and storage on device — `android-host`
+    - **11a.** Save integrity — `save-integrity`
 12. Touch HUD and layout editor — `android-host`
 
 **Phase 5 — host↔guest integration**
@@ -124,7 +134,12 @@ Each chapter has an exit criterion. Do not advance without it. Full list with ex
 18. Release build, signing, distribution — `port-shipping`
 19. Publish audit — `port-shipping`
 
-**Re-entry.** Real work loops 7 ⇄ 9 ⇄ 13 (RE ⇄ patch ⇄ verify) and 12 ⇄ 14 (UI ⇄ verification).
+**Phase 8 — in players' hands**
+
+20. The play-feedback loop — `port-triage`, then whichever skill owns the finding
+
+**Re-entry.** Real work loops 7 ⇄ 9 ⇄ 13 (RE ⇄ patch ⇄ verify) and 12 ⇄ 14 (UI ⇄ verification),
+and chapter 20 sends you back into any of them.
 Coming back after a break does not mean restarting at chapter 0 — ask `port-triage` where you are.
 
 ## Tools
@@ -222,8 +237,8 @@ Before opening a PR:
    claude plugin validate ./plugins/featurephone-port
    claude plugin validate .
    ```
-4. If you changed a skill's `description`, re-run its evaluations — the seven descriptions are the
-   only thing that makes seven sibling skills route correctly. See [evals/README.md](evals/README.md).
+4. If you changed a skill's `description`, re-run its evaluations — the eight descriptions are the
+   only thing that makes eight sibling skills route correctly. See [evals/README.md](evals/README.md).
 5. Bump `version` in `.claude-plugin/plugin.json` (and the matching marketplace entry). See
    [CHANGELOG.md](CHANGELOG.md) for why pushing commits alone is not enough.
 

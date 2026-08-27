@@ -16,6 +16,21 @@ Conventions: `${CLAUDE_PLUGIN_ROOT}/shared/evidence-standard.md`.
 Tags: **(A)** generic procedure · **(B)** worked example from the reference port · **(C)** do not copy.
 Reference-port files are cited as `(ref: server/protocol.py)` — read the mechanism, ignore the path.
 
+⚠ **Scope of the mechanics.** Phases 1–4 assume an **AOT-compiled ARM guest**: they read a serialiser
+chokepoint, a `BL` caller set and fixed-offset loads out of a disassembly, and the packaged tools
+(`extract_packets.py`, `name_requests.py`) decode Thumb only. **Phases 0 and 5–7 are host-side and
+transfer unchanged.** For a **JVM-bytecode guest** — a J2ME MIDlet, or an SKT/SKVM title, which is
+also bytecode ([platform-matrix.md §10](../port-triage/reference/platform-matrix.md#10-what-differs-per-platform))
+— the same five questions apply (framing, request surface, reply layout, the blocking-state variable,
+the unclamped array) but the tooling is a class dumper and a bytecode decompiler: the chokepoint is
+the method that writes and flushes the stream behind `Connector.open`, callers are enumerated through
+constant-pool methodrefs rather than by scanning `BL` targets, Phase 3's string chain collapses to a
+constant-pool reference search (no relocation delta, no static base, no literal pool), and
+width/endianness/signedness come from the stream API (`readByte` vs `readUnsignedByte`, big-endian by
+specification) rather than from a load instruction's flavour. The signedness *obligation* is
+unchanged: clamp to the client's signed range, never mask. **Nobody has run this path** — see
+[reference-implementation.md](../../shared/reference-implementation.md).
+
 ## Three outcomes, and the rule that picks one
 
 A title that opens a socket ends in one of three places. Decide which one you are heading for

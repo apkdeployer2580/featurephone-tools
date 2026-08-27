@@ -1,6 +1,6 @@
 # Trigger evaluations
 
-Seven sibling skills share one problem domain, and only one thing decides which of them a user's
+Eight sibling skills share one problem domain, and only one thing decides which of them a user's
 sentence reaches: the `description` in each `SKILL.md` frontmatter. It is the only text loaded at
 startup. If two descriptions overlap, one steals the other's traffic and the user lands in a skill
 that will confidently do the wrong phase's work.
@@ -17,6 +17,7 @@ description, and again after.**
 | `emulator-core.json` | `emulator-core` |
 | `guest-re.json` | `guest-re` |
 | `android-host.json` | `android-host` |
+| `save-integrity.json` | `save-integrity` |
 | `server-revival.json` | `server-revival` |
 | `port-shipping.json` | `port-shipping` |
 
@@ -80,7 +81,7 @@ per-skill copy is a working file, not the source of truth.
 
 ### Manual baseline
 
-The automated harness measures whether a skill *helps*. It does not, on its own, prove that seven
+The automated harness measures whether a skill *helps*. It does not, on its own, prove that eight
 descriptions *partition* the space. For that, run the matrix by hand.
 
 **With the plugin loaded**, from a clone of the marketplace repo:
@@ -100,7 +101,7 @@ tokens for nothing.
 
 ### The cross-skill matrix — the test that actually matters
 
-Take **every** prompt from **all seven** files (about ninety), run each one once, and build a
+Take **every** prompt from **all eight** files (112 as of 0.2.1), run each one once, and build a
 matrix of prompt → skill that fired.
 
 Pass conditions:
@@ -125,7 +126,7 @@ Failures and their fixes:
 ## Test with more than one model
 
 **The router is the component most sensitive to model choice.** Routing is a judgement call over
-seven similar descriptions, and a smaller model leans harder on literal keyword overlap while a
+eight similar descriptions, and a smaller model leans harder on literal keyword overlap while a
 larger one infers intent — so a description that partitions perfectly under one model can collapse
 into "everything goes to the router" or "everything goes to the biggest description" under
 another.
@@ -137,7 +138,7 @@ inference only work upward.
 
 ## Budget note
 
-The seven descriptions are always in context. Keep each under 1024 characters — a hard cap in the
+The eight descriptions are always in context. Keep each under 1024 characters — a hard cap in the
 portable Agent Skills spec — and put the key use case **first**, because the listing text is
 truncated. Every trigger word you add is a permanent cost paid by every session, including the
 ones that never touch this plugin: add words that a real user types, and delete words that only
@@ -146,7 +147,7 @@ an author would.
 ## When to re-run
 
 - Any change to any `description`. Always the whole matrix, never just the edited skill — the
-  seven descriptions compete, so narrowing one changes where its neighbours' traffic goes.
+  eight descriptions compete, so narrowing one changes where its neighbours' traffic goes.
 - Adding or splitting a skill.
 - Before a release that bumps `MINOR` or `MAJOR`.
 - After a user reports landing in the wrong phase. Add their exact sentence as a new case with a

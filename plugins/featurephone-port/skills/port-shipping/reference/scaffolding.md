@@ -44,11 +44,19 @@ A human doing this by hand gets it 95% right and then spends an afternoon on an
 
 ## 2. The generator contract
 
+**(A) No template repository ships with this plugin, and the generator refuses to run without
+one** — it exits with `Nothing was written` rather than producing a half-project, which is the
+right behaviour. §3 and §7–§10 below *are* the template's specification, together with
+`scaffold.py`'s token table and its `scaffold.toml` reader. Build one once from that spec, tag
+it, and point `--template-repo`/`--template-ref` (or `--offline-template`) at it. **The tag is
+what makes the second and third port cheap** — an untagged branch generates a project you
+cannot reproduce.
+
 ```
 python "${CLAUDE_PLUGIN_ROOT}/tools/scaffold.py" \
   --dest ./mygame --name mygame --display "My Game" \
   --app-id com.example.mygame --env-prefix MYGAME --gradle-prefix mygame \
-  --archive-name mygame.zip --platform ktf --template-ref v0.1.0
+  --archive-name mygame.zip --platform ktf \n  --template-repo <your-template-url> --template-ref <your-tag>
 ```
 
 | flag | purpose |

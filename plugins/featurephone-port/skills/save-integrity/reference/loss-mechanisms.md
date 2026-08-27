@@ -231,14 +231,16 @@ arrives. Detail in [save-vault.md](save-vault.md) §8.
 ## 8. Mechanism F — the server overwriting a live character
 
 **Symptom.** A live character reset to an old, *partial* version immediately after entering an online
-screen: story flags and inventory gone, equipment intact.
+screen — the player reports it as *story, equipment and items all reset*.
 
 **Mechanism: one request opcode, two senders.** **(B)** In the reference protocol a login sub-request and
 a destructive character-restore request were **byte-identical on the wire** — found in production server
 logs, where the same seven bytes appear annotated once as a restore and once as a login sub-request. The
 client's restore handler has no occupancy check, so the reply is deserialised over the loaded character;
-the backup fragment carried equipment only, which is why *story and inventory* are what disappear — the
-symptom's shape identifies the mechanism. `HIGH / CONFIRMED`.
+the backup fragment is header + equipment records + tail, with no story flags and no inventory, and it
+is whatever was last uploaded — so story and inventory vanish outright while equipment reverts to a
+stale snapshot. **(A)** What identifies the mechanism is the *timing* (immediately on entering an
+online screen, with no save action by the player), not the shape of what survived. `HIGH / CONFIRMED`.
 
 **Fix (A) — on the client, not the server.** No server can distinguish the two senders; they are the same
 bytes. Only the host owns the record store and can answer *"does this slot already hold a character?"*. In
@@ -465,7 +467,7 @@ re-file it as a named regression test whose name states the reported sequence
 | Log: `opened <create mode> and closed with NO write — record 1 deleted` | §3 + §5; on a re-aimed cursor it removes *another* character | Disarm the truncate on every failure path; gate deletes with the same pin policy |
 | Log: `record 1 … was NOT stored`, and the game said "saved" | §6 | Return the verdict — after §5's disarming lands |
 | Saves stop persisting after an online screen; withdrawn item vanishes, deposited item duplicates | §10 — a guard is silently refusing | Grep the log for the REFUSED verdict line during that flow; check the guard's arming condition |
-| A live character reset to an old partial version on entering an online screen (equipment intact) | §8 — dual-use opcode | Guard on the client; rewrite the frame, never drop it |
+| A live character reset to an old partial version on entering an online screen (story, equipment and items all reset) | §8 — dual-use opcode | Guard on the client; rewrite the frame, never drop it |
 | "Reset this slot" wiped a character with nothing archived | §7 — whole-directory delete | Audit every deletion path; archive before the recursive delete |
 | A restore appears to work, then the old data is back | §12 — applied live over an open record | Apply at next launch; consume the request first |
 | After one restore, fewer generations remain and the restored one is gone | §12 — three unbudgeted costs | Pin the restored generation outside the tiers |

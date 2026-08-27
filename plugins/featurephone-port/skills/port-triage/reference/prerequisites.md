@@ -183,6 +183,7 @@ Delete the file and rely on cargo-ndk, or generate it.
 | item | where it goes | notes |
 |---|---|---|
 | the game archive | `app/src/main/assets/<archive>.zip` | gitignored **by name and by path**; a fresh clone must not be able to build a runnable APK |
+| the port project template | `scaffold.py --template-repo <url> --template-ref <tag>`, or `--offline-template DIR` | **no template repository is published with this plugin.** Its contract is fully specified — build one once, tag it, reuse it for every later title: the `__TEMPLATE_*__` token table in `tools/scaffold.py`, the `scaffold.toml` manifest it reads, and `port-shipping/reference/scaffolding.md` §3 and §7–§10. |
 | a release keystore + 3 secrets | **outside the repository** | created once; losing it means every user must uninstall, which deletes their saves |
 | a server host + certificate pin | build-time env or an on-device file | only for online titles |
 | a TTF with the glyphs you need | anywhere; referenced by `gen_glyphs.py --font` | only if the host draws CJK text |

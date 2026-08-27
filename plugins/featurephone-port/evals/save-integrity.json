@@ -70,6 +70,11 @@
       "prompt": "my app got killed by the OS and I want to understand the tombstone",
       "expect": "no-trigger",
       "why": "port-shipping crash triage and emulator-core memory footprint. Process death is only this skill's business through its consequence — a kill landing inside an open truncate window — and that consequence is documented as a mechanism, reached from the save symptom rather than from the crash."
+    },
+    {
+      "prompt": "saves vanish whenever android kills the app in the background",
+      "expect": "trigger",
+      "why": "The save-framed twin of this file's 'understand the tombstone' no-trigger, and the discrimination that pair exists to prove: framed as a crash it is port-shipping and emulator-core, framed as a lost record it is this skill. Mechanism is loss-mechanisms.md - fs::write is open(O_TRUNC)+write, so a kill inside that one-syscall window leaves a zero-byte record, which is exactly what the guest reads back as 'no character'."
     }
   ]
 }

@@ -68,8 +68,8 @@
     },
     {
       "prompt": "every save slot reads back as empty even though the game says it saved",
-      "expect": "trigger",
-      "why": "AMBIGUITY PROBE. Named in this skill's description because the usual cause is the emulator's database backend resolving reads through a different path than writes. It can also be the host's storage layer, so android-host landing is an acceptable outcome; guest-re or port-shipping taking it is not. The pass condition is that whichever of the two lands cross-references the other rather than improvising."
+      "expect": "no-trigger",
+      "why": "AMBIGUITY PROBE, three-way since save-integrity was added. save-integrity is the expected lander and the right one: its description carries the near-verbatim trigger 'a slot reads as empty' and this skill's carries no save wording at all. emulator-core is a legitimate owner of two branches and must be reached by handoff rather than improvised: a slot that NEVER held a save is the read path (wipi-c-recipes.md, record-size query mode returning 0), and a save lost although the game said it saved is the store's write verdict being discarded. A slot that USED to work is a deletion and is save-integrity's - this SKILL.md's own disambiguation table says so. android-host is acceptable if it hands off, since the host storage layer produces the same sentence. guest-re or port-shipping taking it is not. Fails when the landing skill does another's phase with no cross-reference."
     }
   ]
 }

@@ -29,7 +29,84 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+Adversarial verification of 0.2.0 — the one item the 0.2.0 handoff left open — was run and its
+first tranche of corrections applied. **Not yet released:** bump `version` in both manifests and
+move this block under a `## [0.2.1]` heading when the rest of the tranche lands. Users keep 0.2.0
+until that happens, because the plugin is cached by its version string.
+
+### Fixed — save-data doctrine (both would have cost a player their character)
+
+- `save-integrity/reference/slot-identity.md` §11 — the redirect's first fail-closed clause required
+  the pin's identity to be *known*, which made clause 3's `0 == 0` branch unreachable and would have
+  refused every write on the title → online → container route. It had resurrected, verbatim, a term
+  the reference port deleted after that exact failure; the port's own tests assert the opposite.
+  §9's rule sentence now back-references the clause so the two cannot drift apart again.
+- `server-revival/reference/refusals-and-holds.md` §11 — the victim class was inverted. The guard
+  fires on an **occupied** slot, so the population at risk is players whose slot *holds a live
+  character*; an empty slot is the one case that must pass through, because that is the real restore.
+  The same fabricated condition had propagated into `black-box-loop.md` (new in 0.2.0) and become a
+  *transferable rule* telling a reader that a test account with a character in slot 0 was safe from
+  the destructive path — which is precisely the configuration in which the reference port destroyed
+  a live character. Both files corrected; the honest-negative-result rule now names the branch you
+  failed to exercise rather than a property of your account.
+- A single symptom description was inverted at **six sites** across four files, and
+  `loss-mechanisms.md` had elevated it into a diagnostic signature — so a porter receiving the real
+  report would have failed to match the mechanism and gone hunting a slot-identity bug instead. What
+  identifies the mechanism is the **timing**, not the shape of what survived.
+
+### Fixed — the eighth skill was added and its indexes were not
+
+0.2.0's only edit to the plugin README was an owner-slug substitution, while the marketplace README
+in the same commit already said "Eight skills".
+
+- `README.md` mentioned `save-integrity` **zero** times: skills table, counts, tool count and the
+  chapter list (missing 11a and 20) all refreshed.
+- `evals/README.md` indexed seven of eight eval files and undercounted the matrix.
+- `port-shipping/SKILL.md` §0 Route reached **none** of its three new reference files —
+  `crash-triage.md`, `distribution-and-recall.md` and `on-device-diagnostics.md` were unreachable
+  from their own router.
+- `port-triage/reference/pipeline.md` — the gate list was rewritten from five to seven gates in
+  0.2.0 without adding **chapter 11a**, the only gate whose failure is unrecoverable for the player.
+  Now eight, in chapter order.
+
+### Fixed — routing evaluations
+
+The 0.2.0 handoff named the risk of `save-integrity` stealing sibling traffic; it was real.
+`android-host.json` carried a save-loss prompt that `save-integrity` wins on description alone, and
+the documented failure procedure would have emitted an instruction to narrow the description of the
+one skill whose reason for existing is that a wrong guess destroys player data. The prompt is now a
+config/save boundary pair proved from both sides, and `emulator-core.json`'s ambiguity probe was
+rewritten as a three-way with the split criterion lifted from that skill's own tables.
+
+### Fixed — SKT is a JVM-bytecode platform, not an ARM one
+
+Established by reading the emulator fork's own SKT backend: it parses the `.msd` as a text
+descriptor (`MIDlet-1:` field 3 is the main class, the same key a `.jad` uses) and boots a JVM with
+the MIDP class set plus an SKVM set and a WIPI-Java set. Seven cells of `platform-matrix.md`'s SKT
+column were wrong, and in every case the correct value was already sitting in the J2ME column.
+The old hedges — "partly", "verify against your fork's loader", "verify the ISA" — were **worse than
+a blank**: they send a porter looking for an ARM address model that does not exist.
+
+- A **provenance row** now separates the two columns that were ported end-to-end from the two that
+  were only read out of a backend, and a reusable **(A)** procedure states how to establish a guest
+  form for any platform in one read.
+- Three files actively asserted that the core and network chapters were "unchanged" for a bytecode
+  guest. They are not: `server-revival`'s Phases 1–4 are ARM-static throughout and the packaged
+  packet tools decode Thumb only. `port-triage/SKILL.md`, `pipeline.md`'s bytecode table and
+  `glossary.md` corrected, and `server-revival/SKILL.md` gained a scope note.
+- `shared/reference-implementation.md` — the plugin's only honest platform-coverage statement — had
+  **zero inbound links** from any skill or reference file. Now linked from the router, the README,
+  the platform matrix and `server-revival`.
+
+J2ME/MIDP content is still unwritten and is deliberately out of scope for now; only the false
+statements about the bytecode path were corrected.
+
+### Fixed — the first command of the shipping skill could not run
+
+`scaffold.py` requires a `--template-repo`, no template repository is published with this plugin,
+and `prerequisites.md`'s "you must supply" list did not mention one. The spec is complete, so it is
+now named as a supplied prerequisite in all three places, with the pointer to its specification.
+No default URL was invented: a default that 404s is worse than a clear refusal.
 
 ## [0.2.0] - 2026-08-27
 

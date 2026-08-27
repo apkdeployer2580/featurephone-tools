@@ -27,9 +27,9 @@
       "why": "Held-key release discipline and the latched-direction joystick with keyup-before-keydown ordering."
     },
     {
-      "prompt": "saves vanish whenever android kills the app in the background",
+      "prompt": "my hud layout and volume setting reset every time android kills the app in the background",
       "expect": "trigger",
-      "why": "App-private storage: synchronous writes so the bytes are on disk when the call returns, plus keeping the on-device layout identical to the headless probe's."
+      "why": "Host-owned state, not saves. Layered on-device configuration and the layout file, both written synchronously at the moment of the edit so the bytes are on disk when the call returns. Mirrors save-integrity.json's config no-trigger, so the pair proves the config/save boundary from both sides."
     },
     {
       "prompt": "how do I pop up a real text input box from rust, the game needs a name typed in",
@@ -70,6 +70,11 @@
       "prompt": "the game stutters badly whenever there are lots of sprites on screen",
       "expect": "no-trigger",
       "why": "emulator-core. Per-draw-call framebuffer round trips in the graphics backend. A useful discrimination test, because 'stutter' feels like a UI-layer complaint and is not."
+    },
+    {
+      "prompt": "my testers' characters vanish after android kills the app",
+      "expect": "no-trigger",
+      "why": "save-integrity. Same process-death event as the config case above and the opposite answer: every 'vanished' report is a deletion or truncation event, never corruption. This file's storage chapter teaches synchronous writes, which is necessary and not sufficient; atomic replacement, the vault and the write gate are save-integrity's."
     }
   ]
 }

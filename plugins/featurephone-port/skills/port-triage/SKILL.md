@@ -36,6 +36,12 @@ Detection is **presence of a magic filename**, nothing more. Loader constants, d
 per-platform parser differences and which chapters change:
 [reference/platform-matrix.md](reference/platform-matrix.md).
 
+⚠ **Coverage across the four is not uniform.** KTF and LGT are exercised end-to-end on a shipped
+port. **SKT/SKVM and J2ME were established by reading the fork's own backends — no port has been run
+on either.** The platform-invariant chapters (3–6, 10–12, 14, 17–19) apply in full; chapters 7–9, 13
+and the static half of 16 are where an SKT or J2ME port derives its own ground. Full split:
+`${CLAUDE_PLUGIN_ROOT}/shared/reference-implementation.md`.
+
 ## 2. What kind of guest is it?
 
 Look inside the jar. This single fact decides the shape of the whole project.
@@ -45,7 +51,17 @@ Look inside the jar. This single fact decides the shape of the whole project.
   base, BSS size, RWPI static base, relocation delta, Thumb patching, headless probe.
 - **Jar full of `.class` files** → **JVM bytecode**. The static ARM toolkit does not apply. Skip
   the disassembly steps inside chapters 7–9 and answer the same questions with JVM-level tooling
-  (class dump, constant-pool and bytecode search). Chapters 1–6 and 10–19 are unchanged.
+  (class dump, constant-pool and bytecode search). Chapters 1–6, 10–15 and 17–19 are unchanged.
+  Chapter 16's Phases 1–4 are **also** ARM-static — read the scope note at the top of
+  `server-revival` before starting it.
+- **A `.msd` descriptor, or a jar whose first eight bytes are `20 00 …`** → **SKT/SKVM, which is
+  also a JVM-bytecode guest**, not a third ISA. Its loader parses the `.msd` as a text descriptor
+  (`MIDlet-1:` field 3 is the main class, exactly as in a `.jad`) and boots a JVM with the MIDP
+  class set **plus** an SKVM set (`com.skt.m.*`, `com.xce.*`) and a WIPI-Java set; a MIDlet
+  subclass launches through the MIDlet launcher, anything else through the SK-VM `Main` entry.
+  So the bytecode row above applies to it in full. **(A)** Confirm this against *your* fork's
+  SKT backend before relying on it — read the emulator's `load()` and see whether it constructs a
+  JVM or an ARM core.
 
 ⚠ On KTF the native member's **filename suffix is the BSS size** (`client.bin<N>` → N bytes of
 zeroed statics appended after the image). Renaming it to `client.bin` is fatal at load.

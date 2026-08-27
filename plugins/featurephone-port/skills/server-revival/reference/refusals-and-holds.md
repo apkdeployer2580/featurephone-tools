@@ -309,7 +309,7 @@ private state is what makes this possible at all, and it is the argument for the
 being *safer* rather than merely more available ([in-process-engine.md](in-process-engine.md)).
 
 > **REFUTED.** *Previously documented,* [reply-re.md](reply-re.md)'s worked reply map: the
-> destructive restore row's mitigation is a **server-side feature flag**, defaulting off.
+> destructive restore row's mitigation is a **server-side feature flag**.
 > **Refuted by:** production logs and a player report — story, equipment and items all reset. The
 > client applies that reply straight into its live character structure with **no occupancy check**,
 > and the request is byte-identical to a routine login step, so no server can tell a real restore
@@ -318,8 +318,13 @@ being *safer* rather than merely more available ([in-process-engine.md](in-proce
 > does protect against the *server operator* enabling something careless. It just does not address a
 > reply the client will apply the instant any peer sends it.
 > **Consequence if carried forward:** a permanent, unrecoverable character reset for any player
-> whose first slot is empty, on an ordinary login, against a server that believes the feature is
-> disabled.
+> whose slot **already holds a live character** — the population the guard exists to protect —
+> triggered by merely entering an online screen, because the login's own sub-request names that
+> slot and the server answers it with whatever stale backup it stored. A slot that is genuinely
+> empty is the one case that must pass through: that is the real restore. And the flag cannot
+> help, because it has to be *on* for the recovery half the player still wants; the reference
+> port shipped it default-off, found that this broke the legitimate restore, turned it on — and
+> only then discovered that with it on no server can tell the two senders apart.
 
 ## 12. The lifecycle facts that shape all of this
 

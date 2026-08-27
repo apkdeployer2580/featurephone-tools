@@ -27,7 +27,7 @@ reference is worth more than a tidy sequence.
 - [Re-entry points](#re-entry-points)
 - [What changes for a JVM-bytecode guest](#what-changes-for-a-jvm-bytecode-guest)
 - [Three shapes of network title, and what each one costs](#three-shapes-of-network-title-and-what-each-one-costs)
-- [The seven gates you must not skip](#the-seven-gates-you-must-not-skip)
+- [The eight gates you must not skip](#the-eight-gates-you-must-not-skip)
 
 ---
 
@@ -468,7 +468,9 @@ one that does not.
 | 9 | Field identity is a name, not an offset — much easier. Keep the two-derivation rule for *semantics*. |
 | 11a | Unchanged. The record store is the *emulator's*, not the guest's, so every loss mechanism and every guard applies identically. |
 | 13 | Patching is bytecode or method interception, not Thumb halfwords. The idempotence and read-verify rules still apply. |
-| 14–20 | Unchanged. |
+| 14–15 | Unchanged, with one substitution: the connect site you redirect is a `Connector.open("socket://…")` constant-pool string, not a dotted-quad literal in the image. |
+| 16 | **Same five questions, different tooling — not unchanged.** `server-revival`'s Phases 1–4 read a serialiser chokepoint, a `BL` caller set and fixed-offset loads out of an ARM disassembly, and `extract_packets.py` decodes Thumb only. On bytecode the flush chokepoint is reached through constant-pool methodrefs, Phase 3's string→request chain collapses to a constant-pool reference search, and width/signedness come from the `DataInput` method chosen (`readByte` vs `readUnsignedByte`, big-endian by specification) rather than from a load instruction's flavour. See the scope note at the top of `server-revival`. |
+| 17–20 | Unchanged. |
 
 ## Three shapes of network title, and what each one costs
 
@@ -500,22 +502,25 @@ one most single-player titles with online conveniences actually land in.
 
 All of it: [server-revival/reference/in-process-engine.md](../../server-revival/reference/in-process-engine.md).
 
-## The seven gates you must not skip
+## The eight gates you must not skip
 
 1. **Chapter 4** — a frame that reports non-black. Everything after it is guesswork otherwise.
 2. **Chapter 7** — a corpus-validated relocation delta. Five agreeing hand-picked strings is a
    coincidence generator.
 3. **Chapter 9** — two independent derivations per offset, before any code depends on it.
-4. **Chapter 14** — zero mismatched pixels, from a diff of the code that actually ships.
-5. **Chapter 19** — the audit across all refs, before the first push to a public remote.
-6. **Generated-artifact staleness** — every generator's `--check` clean, as the **first command of
+4. **Chapter 11a** — the adversarial storage pass, and one verdict line per write in a device
+   trace of the reported slot sequence. It is the only gate whose failure is unrecoverable for
+   the player ([save-integrity](../../save-integrity/SKILL.md)).
+5. **Chapter 14** — zero mismatched pixels, from a diff of the code that actually ships.
+6. **Chapter 19** — the audit across all refs, before the first push to a public remote.
+7. **Generated-artifact staleness** — every generator's `--check` clean, as the **first command of
    any session that touches the archive** and again as the build's stage 0. It is the only gate that
    sees a member which is present, correct-looking and out of date; nothing downstream can.
-7. **Device verification of the shipped build** — open until a human has played *that build*. It is
+8. **Device verification of the shipped build** — open until a human has played *that build*. It is
    a gate CI structurally cannot run, so it is tracked as an explicit per-build state rather than
    assumed by a green pipeline (chapter 20).
 
-If the title has an online component, add an eighth: **no host-chosen quantity ships without an
+If the title has an online component, add a ninth: **no host-chosen quantity ships without an
 executable model of the client's own apply procedure** — the client, not your intuition, decides
 what happens to the number you send
 ([server-revival/reference/client-fidelity.md](../../server-revival/reference/client-fidelity.md)).
